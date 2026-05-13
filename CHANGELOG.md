@@ -5,6 +5,16 @@ Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.0.0/).
 
 ---
 
+## [1.2.2] — 2026-05-13
+
+### ✨ Aggiunto
+- **Endpoint `/health`** per monitoraggio keepalive (UptimeRobot / cron ping)
+  - Risponde sempre `200 OK` con JSON: `{ status, uptime_seconds, active_sessions }`
+  - Non richiede autenticazione — sicuro da esporre pubblicamente
+  - Costante `APP_START_TIME` aggiunta per calcolo uptime dal riavvio del processo
+
+---
+
 ## [1.2.1] — 2026-05-13
 
 ### 🐛 Fix

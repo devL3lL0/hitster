@@ -21,10 +21,10 @@
     }
   ],
   "spotify": {
-    "client_id": "",
-    "client_secret": ""
+    "client_id": "7aed2759abc648e7b1f9ece571b465a7",
+    "client_secret": "16ac34967af74d69b0ce8455c21263e3"
   },
-  "totp_secret": "",
+  "totp_secret": "Y63IEYV2GDMSTFJOHOYWHVTDKY3MXVDC",
   "stands_info": [
     {
       "id": "1",

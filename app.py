@@ -22,6 +22,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 CONFIG_PATH = 'config.json'
 CURRENT_YEAR = datetime.datetime.now().year
+APP_START_TIME = time.time()  # usato dall'endpoint /health
 
 def load_config():
     # NUOVO SET DI ISTRUZIONI DETTAGLIATE
@@ -372,6 +373,15 @@ def reset_2fa():
     config['totp_secret'] = ""
     save_config(config)
     return jsonify({"ok": True})
+
+@app.route('/health')
+def health():
+    """Endpoint keepalive per UptimeRobot — risponde sempre 200 OK con info di stato."""
+    return jsonify({
+        "status": "ok",
+        "uptime_seconds": round(time.time() - APP_START_TIME),
+        "active_sessions": len(sessions),
+    })
 
 @app.route('/')
 def home():

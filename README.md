@@ -11,6 +11,7 @@
 - [Avvio in locale](#-avvio-in-locale)
 - [Come usarlo](#-come-usarlo)
 - [Deploy su Render (step by step)](#-deploy-su-render-step-by-step)
+- [Keepalive con UptimeRobot](#-keepalive-con-uptimerobot)
 - [Variabili d'ambiente](#%EF%B8%8F-variabili-dambiente)
 - [Struttura progetto](#-struttura-progetto)
 - [Stack tecnico](#-stack-tecnico)
@@ -186,7 +187,46 @@ Render rileva automaticamente il push e avvia un **re-deploy** senza downtime.
 | WebSocket disconnesso | Eventlet mancante | Verifica `eventlet` in `requirements.txt` |
 | Nessuna canzone trovata | Credenziali Spotify mancanti o errate | Controlla le env var |
 | 2FA non funziona | Orologio di sistema non sincronizzato | Sincronizza l'orario sul tuo dispositivo |
-| App in "sleep" (piano Free) | Render mette in standby dopo 15 min di inattività | Aggiorna al piano Starter o usa un ping service |
+| App in "sleep" (piano Free) | Render mette in standby dopo 15 min di inattività | Configura UptimeRobot su `/health` ([vedi sotto](#-keepalive-con-uptimerobot)) |
+
+---
+
+## 🤖 Keepalive con UptimeRobot
+
+Il piano **Free di Render** mette l'app in standby dopo ~15 minuti di inattività.
+L'endpoint `/health` è stato creato appositamente per essere pingato da un servizio esterno e mantenere l'app sempre sveglia.
+
+### Risposta dell'endpoint
+
+```json
+GET https://hitster-camp.onrender.com/health
+
+{
+  "status": "ok",
+  "uptime_seconds": 3742,
+  "active_sessions": 2
+}
+```
+
+### Setup UptimeRobot (gratuito)
+
+1. Crea un account su [uptimerobot.com](https://uptimerobot.com) — il piano Free è sufficiente
+2. Clicca **+ Add New Monitor**
+3. Compila il form:
+
+   | Campo | Valore |
+   |---|---|
+   | **Monitor Type** | `HTTP(s)` |
+   | **Friendly Name** | `Hitster Camp Keepalive` |
+   | **URL** | `https://hitster-camp.onrender.com/health` |
+   | **Monitoring Interval** | `5 minutes` |
+   | **Monitor Timeout** | `30 seconds` |
+
+4. Clicca **Create Monitor**
+
+UptimeRobot eseguirà un GET su `/health` ogni 5 minuti — Render riceve la richiesta e non mette in sleep il processo.
+
+> 💡 Nella sezione *Alert Contacts* puoi aggiungere la tua email per ricevere una notifica se l'app va down.
 
 ---
 
