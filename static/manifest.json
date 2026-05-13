@@ -1,0 +1,17 @@
+{
+  "name": "Hitster Camp",
+  "short_name": "Hitster",
+  "description": "Quiz musicale live per il campo estivo",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a1a",
+  "theme_color": "#6366f1",
+  "icons": [
+    {
+      "src": "/static/icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

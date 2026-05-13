@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Admin Panel – Hitster Camp{% endblock %}
+
+{% block header_right %}
+  <a href="/api/admin/logout" class="btn btn-ghost btn-sm">Esci</a>
+{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 2.5rem;">
+  <h1 style="font-family: var(--font-head); font-size: 2.2rem; font-weight: 800; letter-spacing: -1px;">
+    ⚙️ Admin <span style="font-weight: 300; opacity: 0.6;">Settings</span>
+  </h1>
+  <p class="muted">Gestione automatica canzoni e configurazione stand.</p>
+</div>
+
+<form action="/admin" method="POST">
+  
+  <!-- SPOTIFY CARD -->
+  <div class="card">
+    <h2 style="font-size: 1.1rem; color: var(--emerald);"><span style="opacity:0.7"></span> Spotify API</h2>
+    <p class="muted" style="margin-bottom: 1.5rem;">Credenziali necessarie per la ricerca automatica.</p>
+    <div style="display: grid; gap: 1rem;">
+      <input type="text" name="spotify_id" value="{{ config.spotify.client_id }}" placeholder="Client ID">
+      <input type="password" name="spotify_secret" value="{{ config.spotify.client_secret }}" placeholder="Client Secret">
+    </div>
+  </div>
+
+  <!-- FASCE D'ETÀ (LOGICA AUTO) -->
+  <div class="card">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem;">
+      <h2 style="margin: 0; font-size: 1.1rem; color: var(--accent);">👥 Fasce d'Età (Ricerca Auto)</h2>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="addAgeGroup()">+ Aggiungi</button>
+    </div>
+    <p class="muted" style="margin-bottom: 1rem; font-size: 0.85rem;">Il sistema pescherà canzoni in base al range di anni calcolato dall'età.</p>
+    <div id="age-groups-container">
+      {% for group in config.age_groups %}
+      <div class="age-group-row" style="display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 0.75rem; margin-bottom: 1rem; align-items: end;">
+        <div>
+          <label class="muted" style="font-size: 0.7rem; font-weight: 700;">Etichetta</label>
+          <input type="text" name="age_label[]" value="{{ group.label }}" placeholder="es: 12-14 anni" required>
+        </div>
+        <div>
+          <label class="muted" style="font-size: 0.7rem; font-weight: 700;">Età Min</label>
+          <input type="number" name="age_min[]" value="{{ group.min_age }}" required>
+        </div>
+        <div>
+          <label class="muted" style="font-size: 0.7rem; font-weight: 700;">Età Max</label>
+          <input type="number" name="age_max[]" value="{{ group.max_age }}" required>
+        </div>
+        <button type="button" class="btn btn-rose btn-sm" style="padding: 11px 12px;" onclick="this.parentElement.remove()">✕</button>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- GESTIONE STAND -->
+  <div class="card">
+    <h2 style="font-size: 1.1rem; color: var(--cyan);">📍 Configurazione Stand</h2>
+    <div style="display: grid; gap: 1.5rem;">
+      {% for stand in config.stands_info %}
+      <div style="padding: 1.5rem; background: rgba(255,255,255,0.02); border-radius: 24px; border: 1px solid var(--surface-border); box-shadow: 0 10px 30px rgba(0,0,0,0.2);">
+        <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1.25rem;">
+          <div style="background: var(--cyan); color: #000; width: 32px; height: 32px; min-width: 32px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.9rem;">{{ stand.id }}</div>
+          <input type="text" name="stand_name[]" value="{{ stand.name }}" placeholder="Nome Stand" style="padding: 0.8rem 1.2rem; font-size: 1.05rem;" required>
+        </div>
+        <textarea name="stand_desc[]" placeholder="Regole e istruzioni per l'animatore..." 
+          style="font-size: 0.95rem; min-height: 100px;" required>{{ stand.desc }}</textarea>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div style="position: sticky; bottom: 2rem; z-index: 100;">
+    <button type="submit" class="btn btn-primary btn-full" style="height: 60px; font-size: 1.1rem; box-shadow: 0 20px 40px rgba(10, 132, 255, 0.3);">
+      💾 Salva Configurazione
+    </button>
+  </div>
+</form>
+
+<template id="age-group-tpl">
+  <div class="age-group-row" style="display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 0.75rem; margin-bottom: 1rem; align-items: end; animation: fadeIn 0.3s ease;">
+    <input type="text" name="age_label[]" placeholder="Etichetta" required>
+    <input type="number" name="age_min[]" placeholder="Min" required>
+    <input type="number" name="age_max[]" placeholder="Max" required>
+    <button type="button" class="btn btn-rose btn-sm" style="padding: 11px 12px;" onclick="this.parentElement.remove()">✕</button>
+  </div>
+</template>
+
+<script>
+function addAgeGroup() {
+  document.getElementById('age-groups-container').appendChild(document.getElementById('age-group-tpl').content.cloneNode(true));
+}
+async function reset2FA() {
+  const result = await Swal.fire({ title: 'Sei sicuro?', text: "Dovrai scansionare un nuovo QR Code.", icon: 'warning', showCancelButton: true, confirmButtonText: 'Sì, procedi', cancelButtonText: 'Annulla' });
+  if (result.isConfirmed) {
+    const res = await fetch('/api/admin/reset_2fa', { method: 'POST' });
+    if (res.ok) { showToast("2FA resettato."); setTimeout(() => window.location.reload(), 1500); }
+  }
+}
+</script>
+{% endblock %}

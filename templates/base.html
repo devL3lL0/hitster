@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>{% block title %}Hitster Camp{% endblock %}</title>
+  
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#007aff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="/static/icon.png">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+  
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <!-- SWEETALERT2 -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <!-- LOCAL QR GENERATION -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  
+  <style>
+    :root {
+      --bg: #000000;
+      --bg-gradient: radial-gradient(circle at 50% -20%, #1c1c1e 0%, #000000 100%);
+      --surface: rgba(28, 28, 30, 0.7);
+      --surface-border: rgba(255, 255, 255, 0.12);
+      --accent: #0a84ff; 
+      --accent-glow: rgba(10, 132, 255, 0.3);
+      --gold: #ffd60a;
+      --rose: #ff453a;
+      --emerald: #32d74b;
+      --cyan: #64d2ff;
+      --text-main: #ffffff;
+      --text-muted: #8e8e93;
+      --radius-lg: 28px;
+      --radius-md: 18px;
+      --font-body: -apple-system, BlinkMacSystemFont, 'Outfit', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      --font-head: -apple-system, BlinkMacSystemFont, 'Outfit', sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body { background: var(--bg); background-image: var(--bg-gradient); color: var(--text-main); font-family: var(--font-body); min-height: 100vh; padding-bottom: env(safe-area-inset-bottom); }
+
+    .app-header {
+      display: flex; align-items: center; justify-content: space-between; padding: 1.5rem;
+      background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
+      border-bottom: 0.5px solid var(--surface-border); position: sticky; top: 0; z-index: 1000;
+      padding-top: max(1.5rem, env(safe-area-inset-top));
+    }
+    .app-logo { display:flex; align-items:center; gap:0.75rem; text-decoration:none; font-family:var(--font-head); font-weight:800; font-size:1.5rem; color:var(--text-main); letter-spacing:-1px; }
+    .app-logo img { width:34px; height:34px; border-radius:9px; }
+    .app-logo span { color: var(--accent); }
+
+    .badge-code { background:rgba(255,255,255,0.1); color:white; font-weight:700; padding:0.5rem 1rem; border-radius:14px; font-size:0.9rem; border:0.5px solid var(--surface-border); }
+
+    .container { max-width: 650px; margin: 0 auto; padding: 2.5rem 1.5rem 8rem; }
+
+    .card { background: var(--surface); border: 0.5px solid var(--surface-border); border-radius: var(--radius-lg); padding: 2rem; margin-bottom: 1.5rem; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+    .card h2 { font-family: var(--font-head); font-size: 1.4rem; font-weight: 700; margin-bottom: 1.25rem; }
+
+    .btn { display:inline-flex; align-items:center; justify-content:center; gap:0.5rem; padding:1rem 1.75rem; border-radius:18px; border:none; font-family:var(--font-body); font-weight:600; cursor:pointer; transition:all 0.3s cubic-bezier(0.25, 0.1, 0.25, 1); text-decoration:none; font-size:1.05rem; }
+    .btn:active { transform: scale(0.96); }
+    .btn-primary { background:var(--accent); color:white; }
+    .btn-gold { background:var(--gold); color:#000; }
+    .btn-rose { background:var(--rose); color:white; }
+    .btn-emerald { background:var(--emerald); color:white; }
+    .btn-ghost { background:rgba(255, 255, 255, 0.08); color:var(--text-main); border:0.5px solid var(--surface-border); }
+    .btn-full { width: 100%; }
+    .btn-sm { padding: 0.6rem 1.25rem; font-size: 0.9rem; border-radius: 14px; }
+
+    input, select, textarea { 
+      background: rgba(255, 255, 255, 0.05); 
+      border: 1px solid var(--surface-border); 
+      color: white; 
+      padding: 1.1rem 1.4rem; 
+      border-radius: 18px; 
+      font-family: var(--font-body); 
+      font-size: 1.1rem; 
+      width: 100%; 
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); 
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    textarea {
+      resize: vertical;
+      min-height: 100px;
+      line-height: 1.5;
+    }
+    select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%238e8e93' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: calc(100% - 1.2rem) center;
+      padding-right: 3rem;
+    }
+    option { background: #1c1c1e; color: white; }
+    input:focus, select:focus, textarea:focus { 
+      outline:none; 
+      border-color:var(--accent); 
+      background: rgba(255, 255, 255, 0.08);
+      box-shadow:0 0 0 4px var(--accent-glow); 
+    }
+    
+    ::placeholder { color: rgba(255,255,255,0.3); }
+
+    #toast { position:fixed; top:2rem; left:50%; transform:translateX(-50%) translateY(-100px); background:rgba(44, 44, 46, 0.9); backdrop-filter:blur(20px); color:white; padding:0.8rem 1.75rem; border-radius:50px; font-weight:600; border:0.5px solid var(--surface-border); transition:all 0.5s; z-index:2000; display:flex; gap:0.75rem; }
+    #toast.show { transform:translateX(-50%) translateY(0); }
+    #toast.error { border-color: var(--rose); }
+
+    .modal-overlay { position:fixed; inset:0; background:rgba(0, 0, 0, 0.6); backdrop-filter:blur(15px); display:none; place-items:center; padding:1.5rem; z-index:3000; animation: fadeIn 0.3s ease; }
+    .modal { background:#1c1c1e; border:0.5px solid var(--surface-border); border-radius:32px; width:100%; max-width:420px; padding:2.5rem; text-align:center; box-shadow:0 30px 60px rgba(0, 0, 0, 0.5); }
+    .modal h2 { font-weight:800; margin-bottom:1.5rem; }
+
+    .rank-item { display:flex; align-items:center; gap:1.25rem; padding:1.25rem; background:rgba(255, 255, 255, 0.04); border-radius:22px; margin-bottom:0.75rem; border:0.5px solid transparent; }
+    .rank-pos { font-weight:800; font-size:1.5rem; width:2.5rem; text-align:center; color:var(--text-muted); }
+    .rank-name { flex:1; font-weight:600; font-size:1.15rem; }
+    .rank-score { font-family:var(--font-head); font-weight:800; font-size:1.8rem; color:var(--accent); }
+
+    .muted { color: var(--text-muted); font-size: 0.95rem; }
+    .text-center { text-align: center; }
+
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    /* Estetica specifica del QR */
+    #qrcode img { display: block; margin: 0 auto; border-radius: 12px; }
+
+    /* ── CUSTOM SWEETALERT ── */
+    .swal2-popup {
+      background: rgba(28, 28, 30, 0.9) !important;
+      backdrop-filter: blur(25px) !important;
+      -webkit-backdrop-filter: blur(25px) !important;
+      border: 0.5px solid var(--surface-border) !important;
+      border-radius: 30px !important;
+      color: white !important;
+      font-family: var(--font-body) !important;
+    }
+    .swal2-title { font-weight: 800 !important; letter-spacing: -0.5px; }
+    .swal2-confirm { background-color: var(--accent) !important; border-radius: 15px !important; font-weight: 700 !important; }
+    .swal2-cancel { background-color: rgba(255,255,255,0.1) !important; border-radius: 15px !important; font-weight: 700 !important; color: white !important; }
+  </style>
+</head>
+<body>
+
+  <header class="app-header">
+    <a class="app-logo" href="/">
+      <img src="/static/icon.png" alt="Logo">
+      Hitster<span>Camp</span>
+    </a>
+    {% block header_right %}{% endblock %}
+  </header>
+
+  <div class="container">
+    {% block content %}{% endblock %}
+  </div>
+
+  <div class="modal-overlay" id="tutorial-modal">
+    <div class="modal">
+      <h2 id="tutorial-title">Installa l'App</h2>
+      <div id="tutorial-content" style="text-align: left; margin-bottom: 2rem;"></div>
+      <button class="btn btn-primary btn-full" onclick="closeTutorial()">Fine</button>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="admin-modal">
+    <div class="modal">
+      <h2 id="admin-modal-title">🔐 Admin Access</h2>
+      
+      <div id="admin-pwd-view" style="display:none; text-align: left;">
+        <p class="muted" style="margin-bottom: 1.5rem;">Inserisci la password master per configurare il 2FA.</p>
+        <input type="password" id="admin-master-pwd" placeholder="Password..." style="margin-bottom:1.5rem;" />
+        <div style="display:flex; gap:1rem;">
+          <button class="btn btn-ghost btn-full" onclick="closeAdminModal()">Annulla</button>
+          <button class="btn btn-primary btn-full" onclick="proceedToSetup()">Procedi</button>
+        </div>
+      </div>
+
+      <div id="admin-setup-view" style="display:none; text-align: left;">
+        <p class="muted" style="margin-bottom: 1.5rem;">Scansiona questo QR con <strong>Google Authenticator</strong>.</p>
+        <div style="text-align:center; background:white; padding:1.5rem; border-radius:20px; margin-bottom:1.5rem;">
+          <div id="qrcode" style="display: inline-block;"></div>
+        </div>
+        <button class="btn btn-primary btn-full" onclick="showLoginView()">L'ho scansionato</button>
+      </div>
+
+      <div id="admin-login-view" style="display:none;">
+        <p class="muted" style="margin-bottom: 1.5rem;">Inserisci il codice a 6 cifre dall'app.</p>
+        <input type="text" id="totp-code" placeholder="000 000" maxlength="6" inputmode="numeric" 
+          style="text-align:center; font-size:2rem; letter-spacing:8px; font-weight:800; margin-bottom:1.5rem;" />
+        <div style="display:flex; gap:1rem;">
+          <button class="btn btn-ghost btn-full" onclick="closeAdminModal()">Esci</button>
+          <button class="btn btn-primary btn-full" onclick="verifyTOTP()">Entra</button>
+        </div>
+      </div>
+
+      <div id="admin-footer-links" style="margin-top: 1.5rem; font-size: 0.8rem;">
+        <a href="#" class="muted" onclick="showPasswordView(); return false;">Problemi col codice? Setup Device</a>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script>
+    function showToast(msg, isError = false) {
+      const t = document.getElementById('toast');
+      t.innerHTML = (isError ? '⚠️ ' : '✅ ') + msg;
+      t.className = isError ? 'error show' : 'show';
+      setTimeout(() => t.className = isError ? 'error' : '', 3500);
+    }
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js'); });
+    }
+
+    function isIOS() { return [ 'iPad', 'iPhone', 'iPod' ].includes(navigator.platform) || (navigator.userAgent.includes("Mac") && "ontouchend" in document); }
+
+    function showTutorial() {
+      const overlay = document.getElementById('tutorial-modal');
+      const content = document.getElementById('tutorial-content');
+      overlay.style.display = 'grid';
+      if (isIOS()) {
+        content.innerHTML = `<p class="muted" style="margin-bottom: 1rem;">Per iPhone e iPad:</p><div style="display:flex; gap:1rem; margin-bottom:1rem;"><div style="font-weight:800; color:var(--accent)">1.</div><div>Tocca il tasto <strong>Condividi</strong> in Safari.</div></div><div style="display:flex; gap:1rem;"><div style="font-weight:800; color:var(--accent)">2.</div><div>Scorri e scegli <strong>Aggiungi alla Home</strong>.</div></div>`;
+      } else {
+        content.innerHTML = `<p class="muted" style="margin-bottom: 1rem;">Per Android / Chrome:</p><div style="display:flex; gap:1rem; margin-bottom:1rem;"><div style="font-weight:800; color:var(--accent)">1.</div><div>Tocca i <strong>tre puntini</strong>.</div></div><div style="display:flex; gap:1rem;"><div>Seleziona <strong>Installa app</strong>.</div></div>`;
+      }
+    }
+    function closeTutorial() { document.getElementById('tutorial-modal').style.display = 'none'; }
+
+    // ── ADMIN TOTP LOGIC ──
+    async function showAdminModal() {
+      const res = await fetch('/api/admin/check');
+      const data = await res.json();
+      resetAdminViews();
+      if (data.needs_setup) { showPasswordView(); } else { showLoginView(); }
+      document.getElementById('admin-modal').style.display = 'grid';
+    }
+
+    function resetAdminViews() {
+      ['admin-pwd-view', 'admin-setup-view', 'admin-login-view'].forEach(id => {
+        document.getElementById(id).style.display = 'none';
+      });
+      document.getElementById('qrcode').innerHTML = ""; // Pulisce QR precedente
+    }
+
+    function showPasswordView() { resetAdminViews(); document.getElementById('admin-pwd-view').style.display = 'block'; }
+
+    async function proceedToSetup() {
+      const pwd = document.getElementById('admin-master-pwd').value;
+      const res = await fetch('/api/admin/setup', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ password: pwd })
+      });
+      const data = await res.json();
+      if (data.error) {
+        showToast(data.error, true);
+      } else {
+        resetAdminViews();
+        document.getElementById('admin-setup-view').style.display = 'block';
+        // GENERAZIONE QR LOCALE
+        new QRCode(document.getElementById("qrcode"), {
+          text: data.uri,
+          width: 200,
+          height: 200,
+          colorDark : "#000000",
+          colorLight : "#ffffff",
+          correctLevel : QRCode.CorrectLevel.H
+        });
+      }
+    }
+
+    function showLoginView() { resetAdminViews(); document.getElementById('admin-login-view').style.display = 'block'; }
+    function closeAdminModal() { document.getElementById('admin-modal').style.display = 'none'; }
+
+    async function verifyTOTP() {
+      const code = document.getElementById('totp-code').value;
+      if (code.length < 6) return;
+      const res = await fetch('/api/admin/verify', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ code })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        window.location.href = '/admin';
+      } else {
+        showToast(data.error, true);
+      }
+    }
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
