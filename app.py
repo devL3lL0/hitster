@@ -5,6 +5,7 @@ Backend: Flask + Flask-SocketIO + Spotify + TOTP 2FA
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session as flask_session
 from flask_socketio import SocketIO, join_room, leave_room, emit
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import random
 import string
 import time
@@ -88,6 +89,10 @@ def get_spotify_client(config):
         auth_manager = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
         return spotipy.Spotify(auth_manager=auth_manager)
     except: return None
+
+# Cache canzoni per fascia d'età — evita chiamate Spotify ripetute (TTL: 30 min)
+_songs_cache: dict = {}   # key: (min_age, max_age) → (timestamp, tracks)
+SONGS_CACHE_TTL = 1800    # secondi
 
 # ─── Artisti italiani noti (per preferenza italiana) ──────────────────────────
 ITALIAN_ARTISTS = {
@@ -237,14 +242,25 @@ def score_track(track, profile, source_bonus=0):
 def fetch_songs_smart(min_age, max_age, sp):
     """
     Selezione intelligente canzoni per fascia d'età.
-    Priorità: playlist Viral/Top IT (trend TikTok) → query mirate → scoring.
-    Preferisce canzoni italiane; penalizza explicit per fasce giovani.
+    Le chiamate Spotify avvengono in parallelo (ThreadPoolExecutor).
+    Il risultato viene cachato per 30 min per fascia — sessioni consecutive
+    con la stessa fascia non rieseguono le query Spotify.
     """
     if not sp:
         return []
+
+    # Cache hit?
+    cache_key = (min_age, max_age)
+    cached = _songs_cache.get(cache_key)
+    if cached and (time.time() - cached[0]) < SONGS_CACHE_TTL:
+        result = list(cached[1])      # copia della lista
+        random.shuffle(result)
+        return result
+
     profile = build_age_profile(min_age, max_age)
     year_start, _ = profile["year_range"]
     all_tracks = {}  # id -> (track_dict, best_score)
+    lock_tracks = {}
 
     def _add_track(t, source_bonus):
         if not t or not t.get("id"):
@@ -268,30 +284,43 @@ def fetch_songs_smart(min_age, max_age, sp):
         if tid not in all_tracks or all_tracks[tid][1] < s:
             all_tracks[tid] = (td, s)
 
-    # 1. Playlist Spotify IT ufficiali (sorgente principale)
-    for pid in profile["playlist_ids"]:
+    def _fetch_playlist(pid):
         try:
             bonus = PLAYLIST_CATALOG.get(pid, {}).get("bonus", 1)
             res = sp.playlist_tracks(
                 pid, limit=100, market='IT',
                 fields="items(track(id,name,artists,album(release_date),explicit,popularity,preview_url,external_urls))"
             )
-            for item in (res.get("items") or []):
-                _add_track(item.get("track"), bonus)
+            return [(item.get("track"), bonus) for item in (res.get("items") or [])]
         except Exception:
-            pass
+            return []
 
-    # 2. Query mirate per anno/genere (integrano copertura)
-    for q in profile["queries"]:
+    def _fetch_query(q):
         try:
-            res = sp.search(q=q, type='track', limit=50, market='IT')
-            for t in (res.get('tracks', {}).get('items') or []):
-                if t and t.get("popularity", 0) >= profile["pop_threshold"]:
-                    _add_track(t, source_bonus=1)
+            res = sp.search(q=q, type='track', limit=30, market='IT')
+            threshold = profile["pop_threshold"]
+            return [
+                (t, 1) for t in (res.get('tracks', {}).get('items') or [])
+                if t and t.get("popularity", 0) >= threshold
+            ]
         except Exception:
-            pass
+            return []
 
-    # 3. Ordina per score, shuffle interno per varietà
+    # Raccoglie tutti i task da eseguire in parallelo
+    tasks = [("playlist", pid) for pid in profile["playlist_ids"]]
+    tasks += [("query", q) for q in profile["queries"]]
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {
+            executor.submit(_fetch_playlist, t[1]) if t[0] == "playlist"
+            else executor.submit(_fetch_query, t[1]): t
+            for t in tasks
+        }
+        for future in as_completed(futures):
+            for track, bonus in (future.result() or []):
+                _add_track(track, bonus)
+
+    # Ordina per score, shuffle interno per varietà
     sorted_pairs = sorted(all_tracks.values(), key=lambda x: x[1], reverse=True)
     result, bucket, prev_score = [], [], None
     for td, sc in sorted_pairs:
@@ -304,7 +333,11 @@ def fetch_songs_smart(min_age, max_age, sp):
         bucket.append(td)
     random.shuffle(bucket)
     result.extend(bucket)
-    return result[:300]
+    final = result[:300]
+
+    # Salva in cache
+    _songs_cache[cache_key] = (time.time(), list(final))
+    return final
 
 sessions = {}
 def generate_code(): return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
@@ -395,7 +428,7 @@ def create_session():
     age_info = next((g for g in config['age_groups'] if g['id'] == age_id), config['age_groups'][0])
     sp = get_spotify_client(config)
     songs = fetch_songs_smart(age_info.get('min_age', 10), age_info.get('max_age', 15), sp)
-    random.shuffle(songs)
+    # NB: il shuffle è già applicato internamente da fetch_songs_smart
     code = generate_code()
     while code in sessions: code = generate_code()
     sessions[code] = {

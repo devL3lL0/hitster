@@ -5,6 +5,20 @@ Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.0.0/).
 
 ---
 
+## [1.2.3] — 2026-05-13
+
+### ⚡ Performance
+- **Chiamate Spotify in parallelo** — `fetch_songs_smart` ora usa `ThreadPoolExecutor` (max 8 worker) per eseguire tutte le chiamate a playlist e query Spotify contemporaneamente invece che in sequenza. Per una fascia con 5 playlist + 4 query (9 chiamate), il tempo scende da ~9× latenza a ~1× latenza (la più lenta).
+- **Cache per fascia d'età (TTL 30 min)** — il risultato di `fetch_songs_smart` viene memorizzato in `_songs_cache`. Sessioni consecutive con la stessa fascia d'età ricevono istantaneamente la lista canzoni già costruita, senza alcuna chiamata Spotify.
+- **Riduzione limit query** — le query di ricerca Spotify passano da `limit=50` a `limit=30`: meno dati da trasferire e parsare, a parità di qualità (le playlist ufficiali sono già la sorgente principale).
+- Rimosso `random.shuffle(songs)` ridondante in `create_session` (già applicato internamente).
+
+### 🔧 Modificato
+- Aggiunto import `concurrent.futures` (`ThreadPoolExecutor`, `as_completed`)
+- Aggiunta costante `SONGS_CACHE_TTL = 1800` (secondi)
+
+---
+
 ## [1.2.2] — 2026-05-13
 
 ### ✨ Aggiunto
