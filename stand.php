@@ -116,23 +116,37 @@ if (!$session) {
       <!-- SCOREBOARD -->
       <div class="card" style="padding: 2rem 1rem;">
         <div style="display: flex; align-items: center; justify-content: space-between; text-align: center;">
+
+          <!-- Team 1 -->
           <div style="flex: 1;">
             <div id="name-t1" style="font-weight: 800; color: var(--text-muted); font-size: 0.9rem; text-transform: uppercase;">---</div>
-            <div id="score-t1" style="font-family: var(--font-head); font-size: 3.5rem; font-weight: 900; color: var(--accent);">0</div>
-            <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+            <div style="font-size: 0.6rem; color: var(--cyan); font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; margin: 0.5rem 0 0;">🎯 Round</div>
+            <div id="score-t1" style="font-family: var(--font-head); font-size: 3.5rem; font-weight: 900; color: var(--accent); line-height: 1;">0</div>
+            <div style="font-size: 0.72rem; color: var(--text-muted); margin: 0.15rem 0 0.75rem;">
+              🏆 Totale: <span id="total-t1" style="font-weight: 700; color: var(--gold);">0</span>
+            </div>
+            <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
                 <button class="btn btn-primary btn-full" onclick="addPts('t1', 1)">+1</button>
-                <button class="btn btn-ghost btn-sm" onclick="addPts('t1', -1)">-</button>
+                <button class="btn btn-ghost btn-sm" onclick="addPts('t1', -1)">−</button>
             </div>
           </div>
-          <div style="font-weight: 900; color: var(--text-muted); opacity: 0.3; margin-top: -40px;">VS</div>
+
+          <div style="font-weight: 900; color: var(--text-muted); opacity: 0.3; margin-top: -50px;">VS</div>
+
+          <!-- Team 2 -->
           <div style="flex: 1;">
             <div id="name-t2" style="font-weight: 800; color: var(--text-muted); font-size: 0.9rem; text-transform: uppercase;">---</div>
-            <div id="score-t2" style="font-family: var(--font-head); font-size: 3.5rem; font-weight: 900; color: var(--cyan);">0</div>
-            <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+            <div style="font-size: 0.6rem; color: var(--cyan); font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; margin: 0.5rem 0 0;">🎯 Round</div>
+            <div id="score-t2" style="font-family: var(--font-head); font-size: 3.5rem; font-weight: 900; color: var(--cyan); line-height: 1;">0</div>
+            <div style="font-size: 0.72rem; color: var(--text-muted); margin: 0.15rem 0 0.75rem;">
+              🏆 Totale: <span id="total-t2" style="font-weight: 700; color: var(--gold);">0</span>
+            </div>
+            <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
                 <button class="btn btn-full" style="background:var(--cyan); color:white;" onclick="addPts('t2', 1)">+1</button>
-                <button class="btn btn-ghost btn-sm" onclick="addPts('t2', -1)">-</button>
+                <button class="btn btn-ghost btn-sm" onclick="addPts('t2', -1)">−</button>
             </div>
           </div>
+
         </div>
         <button class="btn btn-ghost btn-full btn-sm" style="margin-top: 1.5rem; border-color: rgba(255,214,10,0.2); color: var(--gold);" onclick="addPtsSpecial()">⭐ PUNTO BONUS (+3)</button>
       </div>
@@ -143,7 +157,7 @@ if (!$session) {
       </div>
 
       <div style="text-align:center; padding-bottom: 3rem;">
-        <button class="btn btn-ghost btn-sm" onclick="resetSetup()">🔄 Cambia Stand / Squadre</button>
+        <button class="btn btn-ghost btn-sm" onclick="resetSetup()">🔄 Fine Round / Nuove Squadre</button>
       </div>
     </div>
   </div>
@@ -155,6 +169,9 @@ if (!$session) {
     const CODE = "<?php echo htmlspecialchars($code); ?>";
     let sessionData = <?php echo json_encode(session_snapshot($session)); ?>;
     let myStand = null, myTeam1 = null, myTeam2 = null, currentSong = null;
+    // Punteggio del round corrente (locale, parte da 0 a ogni nuovo round)
+    // I punti vengono comunque inviati al server in tempo reale per il totale globale
+    let roundPts = { t1: 0, t2: 0 };
 
     function onSessionEnded() {
         window.location.href = 'index.php';
@@ -320,7 +337,10 @@ if (!$session) {
             showCancelButton: true
         });
         if (team) {
-            await doApiCall('add_points', { team: team === myTeam1 ? myTeam1 : myTeam2, points: 1 });
+            const which = (team === myTeam1) ? 't1' : 't2';
+            roundPts[which] = (roundPts[which] || 0) + 1;
+            animateVal('score-' + which, roundPts[which]);
+            await doApiCall('add_points', { team, points: 1 });
             await doApiCall('confirm_song', { stand: myStand });
         }
     }
@@ -363,7 +383,10 @@ if (!$session) {
       const t2 = document.getElementById('team2-select').value;
       if (!s || !t1 || !t2) { showToast('Seleziona tutto!', true); return; }
       myStand = s; myTeam1 = t1; myTeam2 = t2;
-      
+
+      // Nuovo round: azzera punteggio locale
+      roundPts = { t1: 0, t2: 0 };
+
       await doApiCall('set_stand', { stand: s, team1: t1, team2: t2 });
       
       const info = sessionData.stands_info.find(i => i.id === s);
@@ -373,6 +396,9 @@ if (!$session) {
       document.getElementById('game-panel').style.display = 'block';
       document.getElementById('name-t1').textContent = t1;
       document.getElementById('name-t2').textContent = t2;
+      // Mostra esplicitamente 0 per il round (i totali li aggiorna updateUI)
+      animateVal('score-t1', 0);
+      animateVal('score-t2', 0);
       updateUI(sessionData);
       
       // Force initial fetch to ensure song sync
@@ -380,7 +406,9 @@ if (!$session) {
     }
 
     function resetSetup() {
-      myStand = null; myTeam1 = myTeam2 = null;
+      // Fine round: azzera il punteggio locale prima di tornare alla selezione
+      roundPts = { t1: 0, t2: 0 };
+      myStand = null; myTeam1 = myTeam2 = null; currentSong = null;
       document.getElementById('setup-card').style.display = 'block';
       document.getElementById('game-panel').style.display = 'none';
     }
@@ -388,8 +416,12 @@ if (!$session) {
     function updateUI(data) {
       if(!data || !data.teams) return;
       const t = data.teams;
-      animateVal('score-t1', t[myTeam1] ?? 0);
-      animateVal('score-t2', t[myTeam2] ?? 0);
+      // I punteggi principali (score-t1/t2) mostrano il round locale e NON vengono
+      // aggiornati dal polling — solo i display "Totale" mostrano il cumulativo globale
+      const el1 = document.getElementById('total-t1');
+      const el2 = document.getElementById('total-t2');
+      if (el1) el1.textContent = t[myTeam1] ?? 0;
+      if (el2) el2.textContent = t[myTeam2] ?? 0;
       renderMiniRank(t);
     }
 
@@ -413,7 +445,14 @@ if (!$session) {
 
     async function addPts(which, p) {
       const team = (which === 't1') ? myTeam1 : myTeam2;
-      await doApiCall('add_points', { team, points: p });
+      const prev = roundPts[which] || 0;
+      // Clamp a 0: il round non può andare sotto zero
+      roundPts[which] = Math.max(0, prev + p);
+      const diff = roundPts[which] - prev;
+      animateVal('score-' + which, roundPts[which]);
+      // Invia all'API solo se il valore è effettivamente cambiato
+      // (evita decrementi globali quando il round è già a 0)
+      if (diff !== 0) await doApiCall('add_points', { team, points: diff });
     }
 
     async function addPtsSpecial() {
@@ -424,7 +463,12 @@ if (!$session) {
             inputPlaceholder: 'Scegli squadra...',
             showCancelButton: true
         });
-        if (team) await addPts(team === myTeam1 ? 't1' : 't2', 3);
+        if (team) {
+            const which = (team === myTeam1) ? 't1' : 't2';
+            roundPts[which] = (roundPts[which] || 0) + 3;
+            animateVal('score-' + which, roundPts[which]);
+            await doApiCall('add_points', { team, points: 3 });
+        }
     }
   </script>
 </body>

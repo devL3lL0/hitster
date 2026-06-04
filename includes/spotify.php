@@ -64,32 +64,32 @@ function build_age_profile($min_age, $max_age) {
     $y5  = $y - 5;
 
     if ($avg <= 11) {
-        // Bambini: musica recente, niente esplicito, pop leggero
+        // Bambini: solo hit recenti e molto popolari, niente esplicito.
+        // Year from ristretto: i bambini conoscono solo gli ultimi 5 anni.
         return [
-            'year_from'         => $y - 8,
-            'pop_threshold'     => 50,
+            'year_from'         => $y - 5,
+            'pop_threshold'     => 65,
             'allow_explicit'    => false,
             'penalize_explicit' => false,
             'playlist_terms'    => [
                 "top 50 italia",
+                "viral 50 italia",
                 "pop italiano $y",
                 "sanremo $y $y1",
                 "hits italia $y1 $y",
-                "musica italiana ragazzi",
             ],
             'track_terms'       => [
-                "pop italiano $y2 $y1 $y",
+                "pop italiano $y1 $y",
                 "sanremo $y1 $y",
-                "top italia $y1",
             ],
         ];
     }
 
     if ($avg <= 14) {
-        // Pre-teen: pop, TikTok, Sanremo recente, niente esplicito
+        // Pre-teen: pop hit recenti, TikTok, Sanremo, zero esplicito.
         return [
-            'year_from'         => $y - 7,
-            'pop_threshold'     => 55,
+            'year_from'         => $y - 6,
+            'pop_threshold'     => 65,
             'allow_explicit'    => false,
             'penalize_explicit' => false,
             'playlist_terms'    => [
@@ -101,7 +101,7 @@ function build_age_profile($min_age, $max_age) {
                 "hits italia $y1",
             ],
             'track_terms'       => [
-                "pop italiano hit $y2 $y1 $y",
+                "pop italiano hit $y1 $y",
                 "sanremo $y1 $y",
                 "tiktok italia $y1 $y",
             ],
@@ -109,24 +109,24 @@ function build_age_profile($min_age, $max_age) {
     }
 
     if ($avg <= 17) {
-        // Teen: trap, pop, TikTok, Sanremo, esplicito penalizzato
+        // Teen: pop, rap e trap — MA senza esplicito (filtro assoluto).
+        // Gli under 18 ai camp non dovrebbero sentire contenuti espliciti.
         return [
             'year_from'         => $y - 7,
-            'pop_threshold'     => 55,
-            'allow_explicit'    => true,
-            'penalize_explicit' => true,
+            'pop_threshold'     => 60,
+            'allow_explicit'    => false,
+            'penalize_explicit' => false,
             'playlist_terms'    => [
                 "top 50 italia",
                 "viral 50 italia",
                 "tiktok italia",
-                "rap italiano $y",
-                "trap italiana $y1 $y",
-                "sanremo $y $y1",
                 "pop italiano $y",
+                "rap italiano $y",
+                "sanremo $y $y1",
             ],
             'track_terms'       => [
-                "pop italiano hit $y3 $y2 $y1 $y",
-                "trap italiana $y2 $y1 $y",
+                "pop italiano hit $y2 $y1 $y",
+                "rap italiano $y1 $y",
                 "sanremo $y2 $y1 $y",
                 "tiktok viral italia $y1 $y",
             ],
@@ -134,47 +134,43 @@ function build_age_profile($min_age, $max_age) {
     }
 
     if ($avg <= 22) {
-        // Giovani adulti: rap, indie, pop anni 2010
+        // Giovani adulti: rap, pop anni 2010-2020, esplicito penalizzato.
         return [
             'year_from'         => $y - 11,
-            'pop_threshold'     => 50,
+            'pop_threshold'     => 55,
             'allow_explicit'    => true,
             'penalize_explicit' => true,
             'playlist_terms'    => [
                 "top 50 italia",
                 "viral 50 italia",
                 "rap italiano",
-                "indie italiano",
-                "hits italia anni 2010",
                 "pop italiano $y3 $y4",
+                "hits italia anni 2010 2020",
             ],
             'track_terms'       => [
                 "pop italiano hit $y4 $y3 $y2 $y1",
                 "rap italiano $y4 $y3 $y2 $y1",
                 "sanremo $y4 $y3 $y2 $y1 $y",
-                "indie italiano $y5 $y4 $y3",
             ],
         ];
     }
 
-    // Adulti / fascia ampia: classici + moderni
+    // Adulti / fascia ampia: classici + moderni, esplicito penalizzato.
     return [
         'year_from'         => $y - 21,
-        'pop_threshold'     => 45,
+        'pop_threshold'     => 50,
         'allow_explicit'    => true,
-        'penalize_explicit' => false,
+        'penalize_explicit' => true,
         'playlist_terms'    => [
             "top 50 italia",
-            "hits italiane anni 2000",
-            "cantautori italiani",
+            "hits italiane",
             "classici italiani",
-            "rock italiano",
             "sanremo classici",
+            "cantautori italiani",
         ],
         'track_terms'       => [
-            "pop italiano anni 2000 2010 classici",
-            "cantautori italiani",
-            "rock italiano",
+            "pop italiano classici hits",
+            "cantautori italiani famosi",
             "sanremo classici hits",
             "hits italia " . ($y - 15) . " " . ($y - 10) . " " . ($y - 5),
         ],
@@ -201,8 +197,11 @@ function discover_playlists_for_profile($profile, $token, $per_query = 5) {
         foreach ($res['playlists']['items'] ?? [] as $pl) {
             if (empty($pl['id'])) continue;
             $pid = $pl['id'];
-            // Teniamo il bonus più alto se la playlist appare in più query
-            $playlist_map[$pid] = max($playlist_map[$pid] ?? 0, $bonus);
+            // Le playlist editoriali di Spotify (owner.id = 'spotify') ricevono +1 bonus
+            // extra perché sono curate e contengono brani più noti e rilevanti
+            $is_editorial = ($pl['owner']['id'] ?? '') === 'spotify';
+            $effective    = $is_editorial ? $bonus + 1 : $bonus;
+            $playlist_map[$pid] = max($playlist_map[$pid] ?? 0, $effective);
         }
     }
 
@@ -232,10 +231,8 @@ function score_track($track, $profile, $source_bonus = 0, array $italian_set = [
 
     // Bonus artista italiano (rilevato dinamicamente)
     $artist_key = strtolower(trim($track['artist'] ?? ''));
-    if (!empty($italian_set[$artist_key])) $score += 2;
-
-    // Penalità esplicito
-    if (!empty($track['explicit']) && $profile['penalize_explicit']) $score -= 3;
+    if (!empty($italian_set[$artist_key])) $score += 3; // +3 per artisti italiani (rilevati dinamicamente)
+    if (!empty($track['explicit']) && $profile['penalize_explicit']) $score -= 5; // penalizzazione forte contenuti espliciti
 
     return $score;
 }
@@ -260,6 +257,9 @@ function fetch_songs_smart($min_age, $max_age, $token) {
     $ingest = function ($t, $bonus) use (&$raw, &$freq, $profile, $year_from) {
         if (empty($t['id'])) return;
         if (!empty($t['explicit']) && !$profile['allow_explicit']) return;
+        // Filtro popolarità minima assoluta: esclude brani oscuri/di nicchia
+        // indipendentemente da quanto siano recenti o italiani
+        if (($t['popularity'] ?? 0) < 40) return;
 
         $year = intval(substr($t['album']['release_date'] ?? '0', 0, 4));
         if ($year < $year_from) return;
