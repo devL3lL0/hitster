@@ -1,0 +1,388 @@
+<?php
+require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/config.php';
+
+// ─── Auth ────────────────────────────────────────────────────────────────────
+
+function spotify_get_token($client_id, $client_secret) {
+    $db   = DB::getInstance();
+    $stmt = $db->query("SELECT access_token, expires_at FROM hitster_spotify_token WHERE id = 1");
+    $row  = $stmt->fetch();
+
+    if ($row && $row['expires_at'] > time() + 60) {
+        return $row['access_token'];
+    }
+
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, 'https://accounts.spotify.com/api/token');
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_POST, 1);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, 'grant_type=client_credentials');
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Authorization: Basic ' . base64_encode($client_id . ':' . $client_secret),
+        'Content-Type: application/x-www-form-urlencoded',
+    ]);
+    $result = curl_exec($ch);
+    curl_close($ch);
+
+    $data = json_decode($result, true);
+    if (isset($data['access_token'])) {
+        $token   = $data['access_token'];
+        $expires = time() + $data['expires_in'];
+        $stmt    = $db->prepare("INSERT INTO hitster_spotify_token (id, access_token, expires_at) VALUES (1, ?, ?) ON DUPLICATE KEY UPDATE access_token=?, expires_at=?");
+        $stmt->execute([$token, $expires, $token, $expires]);
+        return $token;
+    }
+
+    return null;
+}
+
+function spotify_request($url, $token) {
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 8);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Bearer ' . $token]);
+    $result = curl_exec($ch);
+    curl_close($ch);
+    return json_decode($result, true) ?? [];
+}
+
+// ─── Dynamic Age Profile ──────────────────────────────────────────────────────
+// Costruisce i termini di ricerca in modo dinamico a partire da CURRENT_YEAR.
+// Nessun anno o ID playlist è hardcoded: tutto viene calcolato al runtime.
+
+function build_age_profile($min_age, $max_age) {
+    $avg = ($min_age + $max_age) / 2;
+    $y   = CURRENT_YEAR;
+    $y1  = $y - 1;
+    $y2  = $y - 2;
+    $y3  = $y - 3;
+    $y4  = $y - 4;
+    $y5  = $y - 5;
+
+    if ($avg <= 11) {
+        // Bambini: musica recente, niente esplicito, pop leggero
+        return [
+            'year_from'         => $y - 8,
+            'pop_threshold'     => 50,
+            'allow_explicit'    => false,
+            'penalize_explicit' => false,
+            'playlist_terms'    => [
+                "top 50 italia",
+                "pop italiano $y",
+                "sanremo $y $y1",
+                "hits italia $y1 $y",
+                "musica italiana ragazzi",
+            ],
+            'track_terms'       => [
+                "pop italiano $y2 $y1 $y",
+                "sanremo $y1 $y",
+                "top italia $y1",
+            ],
+        ];
+    }
+
+    if ($avg <= 14) {
+        // Pre-teen: pop, TikTok, Sanremo recente, niente esplicito
+        return [
+            'year_from'         => $y - 7,
+            'pop_threshold'     => 55,
+            'allow_explicit'    => false,
+            'penalize_explicit' => false,
+            'playlist_terms'    => [
+                "top 50 italia",
+                "viral 50 italia",
+                "tiktok italia $y",
+                "pop italiano $y $y1",
+                "sanremo $y $y1",
+                "hits italia $y1",
+            ],
+            'track_terms'       => [
+                "pop italiano hit $y2 $y1 $y",
+                "sanremo $y1 $y",
+                "tiktok italia $y1 $y",
+            ],
+        ];
+    }
+
+    if ($avg <= 17) {
+        // Teen: trap, pop, TikTok, Sanremo, esplicito penalizzato
+        return [
+            'year_from'         => $y - 7,
+            'pop_threshold'     => 55,
+            'allow_explicit'    => true,
+            'penalize_explicit' => true,
+            'playlist_terms'    => [
+                "top 50 italia",
+                "viral 50 italia",
+                "tiktok italia",
+                "rap italiano $y",
+                "trap italiana $y1 $y",
+                "sanremo $y $y1",
+                "pop italiano $y",
+            ],
+            'track_terms'       => [
+                "pop italiano hit $y3 $y2 $y1 $y",
+                "trap italiana $y2 $y1 $y",
+                "sanremo $y2 $y1 $y",
+                "tiktok viral italia $y1 $y",
+            ],
+        ];
+    }
+
+    if ($avg <= 22) {
+        // Giovani adulti: rap, indie, pop anni 2010
+        return [
+            'year_from'         => $y - 11,
+            'pop_threshold'     => 50,
+            'allow_explicit'    => true,
+            'penalize_explicit' => true,
+            'playlist_terms'    => [
+                "top 50 italia",
+                "viral 50 italia",
+                "rap italiano",
+                "indie italiano",
+                "hits italia anni 2010",
+                "pop italiano $y3 $y4",
+            ],
+            'track_terms'       => [
+                "pop italiano hit $y4 $y3 $y2 $y1",
+                "rap italiano $y4 $y3 $y2 $y1",
+                "sanremo $y4 $y3 $y2 $y1 $y",
+                "indie italiano $y5 $y4 $y3",
+            ],
+        ];
+    }
+
+    // Adulti / fascia ampia: classici + moderni
+    return [
+        'year_from'         => $y - 21,
+        'pop_threshold'     => 45,
+        'allow_explicit'    => true,
+        'penalize_explicit' => false,
+        'playlist_terms'    => [
+            "top 50 italia",
+            "hits italiane anni 2000",
+            "cantautori italiani",
+            "classici italiani",
+            "rock italiano",
+            "sanremo classici",
+        ],
+        'track_terms'       => [
+            "pop italiano anni 2000 2010 classici",
+            "cantautori italiani",
+            "rock italiano",
+            "sanremo classici hits",
+            "hits italia " . ($y - 15) . " " . ($y - 10) . " " . ($y - 5),
+        ],
+    ];
+}
+
+// ─── Playlist Discovery ───────────────────────────────────────────────────────
+// Cerca su Spotify le playlist italiane che corrispondono ai termini del profilo.
+// Restituisce una mappa playlist_id => source_bonus (le prime query valgono di più).
+
+function discover_playlists_for_profile($profile, $token, $per_query = 5) {
+    $playlist_map = []; // pid => max_bonus
+
+    foreach ($profile['playlist_terms'] as $i => $term) {
+        // I primi termini (più specifici) hanno un bonus sorgente maggiore
+        if ($i === 0)      $bonus = 3;
+        elseif ($i <= 2)   $bonus = 2;
+        else               $bonus = 1;
+
+        $url = "https://api.spotify.com/v1/search?q=" . urlencode($term)
+             . "&type=playlist&market=IT&limit={$per_query}";
+        $res = spotify_request($url, $token);
+
+        foreach ($res['playlists']['items'] ?? [] as $pl) {
+            if (empty($pl['id'])) continue;
+            $pid = $pl['id'];
+            // Teniamo il bonus più alto se la playlist appare in più query
+            $playlist_map[$pid] = max($playlist_map[$pid] ?? 0, $bonus);
+        }
+    }
+
+    return $playlist_map;
+}
+
+// ─── Scoring ─────────────────────────────────────────────────────────────────
+// Il bonus "artista italiano" è ora applicato tramite un set dinamico passato
+// come parametro — nessuna lista hardcoded.
+
+function score_track($track, $profile, $source_bonus = 0, array $italian_set = []) {
+    $score = $source_bonus;
+
+    // Bonus popolarità
+    $pop = $track['popularity'] ?? 0;
+    if ($pop >= 80) $score += 4;
+    elseif ($pop >= 70) $score += 3;
+    elseif ($pop >= 60) $score += 2;
+    elseif ($pop >= 50) $score += 1;
+
+    // Bonus recency
+    $age = CURRENT_YEAR - intval($track['year'] ?? 0);
+    if ($age <= 1)      $score += 4;
+    elseif ($age <= 2)  $score += 3;
+    elseif ($age <= 3)  $score += 2;
+    elseif ($age <= 5)  $score += 1;
+
+    // Bonus artista italiano (rilevato dinamicamente)
+    $artist_key = strtolower(trim($track['artist'] ?? ''));
+    if (!empty($italian_set[$artist_key])) $score += 2;
+
+    // Penalità esplicito
+    if (!empty($track['explicit']) && $profile['penalize_explicit']) $score -= 3;
+
+    return $score;
+}
+
+// ─── Main Fetch ───────────────────────────────────────────────────────────────
+// Orchestrazione completa: scoperta playlist → raccolta brani → rilevamento
+// artisti italiani dinamico → scoring finale → ordinamento e shuffle.
+
+function fetch_songs_smart($min_age, $max_age, $token) {
+    if (!$token) return [];
+
+    $profile   = build_age_profile($min_age, $max_age);
+    $year_from = $profile['year_from'];
+
+    // $raw: tid => [track_data, max_source_bonus]
+    $raw  = [];
+    // Frequenza artisti nelle playlist italiane scoperte
+    // → determina dinamicamente chi è "italiano"
+    $freq = [];
+
+    // Closure per aggiungere un brano alla raccolta
+    $ingest = function ($t, $bonus) use (&$raw, &$freq, $profile, $year_from) {
+        if (empty($t['id'])) return;
+        if (!empty($t['explicit']) && !$profile['allow_explicit']) return;
+
+        $year = intval(substr($t['album']['release_date'] ?? '0', 0, 4));
+        if ($year < $year_from) return;
+
+        $tid    = $t['id'];
+        $artist = $t['artists'][0]['name'] ?? 'Unknown';
+
+        // Conteggio frequenza artisti (case-insensitive)
+        $key       = strtolower($artist);
+        $freq[$key] = ($freq[$key] ?? 0) + 1;
+
+        $td = [
+            'title'       => $t['name'],
+            'artist'      => $artist,
+            'id'          => $tid,
+            'year'        => $year > 0 ? (string)$year : '???',
+            'preview_url' => $t['preview_url'] ?? null,
+            'spotify_url' => $t['external_urls']['spotify'] ?? null,
+            'explicit'    => $t['explicit'] ?? false,
+            'popularity'  => $t['popularity'] ?? 0,
+        ];
+
+        // Teniamo l'entry con il bonus sorgente più alto
+        if (!isset($raw[$tid]) || $raw[$tid][1] < $bonus) {
+            $raw[$tid] = [$td, $bonus];
+        }
+    };
+
+    // ── 1. Scoperta playlist dinamica ────────────────────────────────────────
+    $playlist_map = discover_playlists_for_profile($profile, $token);
+
+    // ── 2. Fetch brani dalle playlist scoperte ───────────────────────────────
+    foreach ($playlist_map as $pid => $bonus) {
+        $url = "https://api.spotify.com/v1/playlists/{$pid}/tracks"
+             . "?limit=100&market=IT"
+             . "&fields=items(track(id,name,artists,album(release_date),explicit,popularity,preview_url,external_urls))";
+        $res = spotify_request($url, $token);
+        foreach ($res['items'] ?? [] as $item) {
+            if (!empty($item['track'])) {
+                $ingest($item['track'], $bonus);
+            }
+        }
+    }
+
+    // ── 3. Ricerche dirette di brani per copertura extra ─────────────────────
+    foreach ($profile['track_terms'] as $q) {
+        $url = "https://api.spotify.com/v1/search?q=" . urlencode($q)
+             . "&type=track&limit=50&market=IT";
+        $res = spotify_request($url, $token);
+        foreach ($res['tracks']['items'] ?? [] as $t) {
+            if (($t['popularity'] ?? 0) >= $profile['pop_threshold']) {
+                $ingest($t, 1);
+            }
+        }
+    }
+
+    // ── 4. Rilevamento artisti italiani dinamico ─────────────────────────────
+    // Un artista è considerato "italiano" se appare 2+ volte nelle playlist
+    // italiane scoperte — nessuna lista hardcoded necessaria.
+    $italian_set = array_fill_keys(
+        array_keys(array_filter($freq, fn($count) => $count >= 2)),
+        true
+    );
+
+    // ── 5. Scoring finale con set italiano dinamico ───────────────────────────
+    $scored = [];
+    foreach ($raw as $tid => [$td, $bonus]) {
+        $scored[] = [$td, score_track($td, $profile, $bonus, $italian_set)];
+    }
+
+    // ── 6. Ordinamento + shuffle per bucket ──────────────────────────────────
+    // Ordina per score decrescente, poi mischia brani dello stesso "livello"
+    // per variare l'ordine mantenendo la qualità complessiva.
+    usort($scored, fn($a, $b) => $b[1] <=> $a[1]);
+
+    $result = [];
+    $bucket = [];
+    $prev   = null;
+
+    foreach ($scored as [$td, $sc]) {
+        if ($prev === null) $prev = $sc;
+        if (abs($sc - $prev) > 2) {
+            shuffle($bucket);
+            $result = array_merge($result, $bucket);
+            $bucket = [];
+            $prev   = $sc;
+        }
+        $bucket[] = $td;
+    }
+    shuffle($bucket);
+    $result = array_merge($result, $bucket);
+
+    return array_slice($result, 0, 300);
+}
+
+// ─── Cache Layer ──────────────────────────────────────────────────────────────
+// Invariato: la cache a 30 minuti su DB riduce il carico sulle API Spotify.
+
+function get_cached_songs($min_age, $max_age, $token) {
+    $db  = DB::getInstance();
+    $key = "{$min_age}-{$max_age}";
+
+    $stmt = $db->prepare("SELECT songs, cached_at FROM hitster_song_cache WHERE age_key = ?");
+    $stmt->execute([$key]);
+    $row = $stmt->fetch();
+
+    if ($row && (time() - $row['cached_at']) < CACHE_TTL) {
+        $songs = json_decode($row['songs'], true);
+        if (!empty($songs)) {
+            shuffle($songs);
+            return $songs;
+        }
+    }
+
+    $songs = fetch_songs_smart($min_age, $max_age, $token);
+
+    if (!empty($songs)) {
+        $stmt = $db->prepare("INSERT INTO hitster_song_cache (age_key, songs, cached_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE songs=?, cached_at=?");
+        $json = json_encode($songs, JSON_UNESCAPED_UNICODE);
+        $now  = time();
+        $stmt->execute([$key, $json, $now, $json, $now]);
+    }
+
+    shuffle($songs);
+    return $songs;
+}

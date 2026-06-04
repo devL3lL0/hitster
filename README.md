@@ -1,301 +1,332 @@
 # 🎵 Hitster Camp
 
-> Quiz musicale live per campo estivo — selezione canzoni intelligente per fascia d'età, real-time via WebSocket.
-
-**Stack:** Flask · Flask-SocketIO · Spotify API · TOTP 2FA · Render
+> **Quiz musicale live per campi estivi.** Un'app web multi-stand che usa l'API Spotify per generare sessioni di gioco musicale in tempo reale, pensata per animatori di camping e campi estivi.
 
 ---
 
-## 📖 Indice
+## 📖 Cos'è Hitster Camp?
 
-- [Avvio in locale](#-avvio-in-locale)
-- [Come usarlo](#-come-usarlo)
-- [Deploy su Render (step by step)](#-deploy-su-render-step-by-step)
-- [Keepalive con UptimeRobot](#-keepalive-con-uptimerobot)
-- [Variabili d'ambiente](#%EF%B8%8F-variabili-dambiente)
-- [Struttura progetto](#-struttura-progetto)
-- [Stack tecnico](#-stack-tecnico)
-- [Regole del gioco](#-regole-del-gioco)
-- [Changelog](#-changelog)
+Hitster Camp è una web app **PHP + MySQL** che replica e potenzia il gioco da tavolo Hitster, adattandolo per l'uso in ambienti multi-stand (es. campi estivi con squadre che ruotano tra diverse postazioni). Ogni sessione di gioco genera automaticamente una playlist di canzoni italiane da Spotify, calibrata sulla fascia d'età dei partecipanti.
 
 ---
 
-## ▶️ Avvio in locale
+## 🏗️ Architettura
 
-```bash
-# 1. Clona il repository
-git clone https://github.com/TUO_USERNAME/hitster-camp.git
-cd hitster-camp
-
-# 2. (Opzionale) Crea un ambiente virtuale
-python -m venv venv
-venv\Scripts\activate        # Windows
-# source venv/bin/activate   # macOS/Linux
-
-# 3. Installa le dipendenze
-pip install -r requirements.txt
-
-# 4. Avvia il server
-python app.py
+```
+hitster-camp-php/
+├── index.php              # Homepage: crea partita o unisciti con codice
+├── master.php             # Dashboard del "master": classifica, stato stand, link animatori
+├── stand.php              # Pannello dell'animatore: gioco, pesca canzone, punteggi
+├── admin.php              # Pannello admin: configurazione Spotify, fasce d'età, 2FA
+├── api.php                # API REST JSON (tutte le azioni di gioco)
+├── health.php             # Endpoint di health-check
+├── test_spotify.php       # Script di diagnostica connessione Spotify (debug)
+├── setup.sql              # Script SQL per creare le tabelle
+├── manifest.json          # Manifesto PWA (installabile come app)
+├── sw.js                  # Service Worker (cache offline base)
+├── robots.txt             # Regole crawler (delay per Bing/MSN)
+├── .htaccess              # Apache: blocco /includes/, URL rewrite /master/CODE, /stand/CODE
+├── _private/
+│   ├── db_config.php      # Credenziali database (fuori dalla webroot)
+│   └── .htaccess          # Blocca accesso diretto alla cartella
+├── includes/
+│   ├── db.php             # Singleton PDO (connessione MySQL)
+│   ├── config.php         # Caricamento/salvataggio config da DB, stand e fasce d'età
+│   ├── session_store.php  # CRUD sessioni di gioco su DB
+│   ├── spotify.php        # Integrazione Spotify API (token, discovery dinamica, scoring)
+│   └── totp.php           # Implementazione TOTP RFC 6238 (2FA admin)
+└── assets/
+    ├── css/style.css      # Design system dark mode (CSS puro)
+    ├── js/base.js         # JS condiviso: toast, modal, PollingEngine, TOTP
+    └── img/icon.png       # Icona app
 ```
 
-Apri il browser su → **http://localhost:5000**
+### URL Rewrite (`.htaccess`)
+
+Il server espone URL pulite tramite `mod_rewrite`:
+- `/master/ABC123` → `master.php?code=ABC123`
+- `/stand/ABC123` → `stand.php?code=ABC123`
+- L'accesso diretto a `/includes/` è bloccato con `403 Forbidden`
 
 ---
 
-## 📱 Come usarlo
+## 🎮 Come Funziona
 
-### 1. Master (coordinatore)
-- Vai su `http://localhost:5000`
-- Seleziona la **fascia d'età** del gruppo
-- Clicca **Crea partita** — il sistema scarica automaticamente le canzoni più adatte
-- Aggiungi le squadre e condividi il **codice sessione** agli animatori
+### Flusso di Gioco
 
-### 2. Animatori Stand
-- Vai su `http://localhost:5000` (o ricevi il link diretto)
-- Inserisci il codice sessione
-- Scegli il tuo **stand** (1–6) e le due squadre che si sfidano
-- Usa **Prossima canzone** per pescare dal mazzo
-- Assegna punti con i bottoni (+1, +3, -1)
+1. **Il Master** apre `index.php`, sceglie la fascia d'età e crea una partita → riceve un **codice a 6 caratteri** (es. `ABC123`) e viene reindirizzato al suo pannello (`master.php`).
+2. **Gli Animatori** aprono `index.php`, inseriscono il codice e vengono reindirizzati al loro pannello stand (`stand.php`).
+3. Ogni animatore sceglie il suo **stand** (postazione di gioco) e le due **squadre** che si sfidano.
+4. L'animatore pesca canzoni con il pulsante "Pesca Nuova" e usa il player Spotify integrato per farle ascoltare.
+5. I punti vengono assegnati manualmente dall'animatore (+1 normale, +3 bonus).
+6. Il master vede in tempo reale la classifica e lo stato di tutti gli stand.
 
-### 3. Admin Panel
-- Vai su `/admin` e autenticati con TOTP 2FA (Google Authenticator)
-- Configura le credenziali Spotify, le fasce d'età e le descrizioni degli stand
+### I 6 Stand (Modalità di Gioco)
 
----
-
-## 🚀 Deploy su Render (step by step)
-
-### Prerequisiti
-- Account [GitHub](https://github.com) con il codice pushato su un repository
-- Account [Render](https://render.com) (gratuito)
-- Credenziali Spotify API ([vedi sotto](#spotify-api))
+| Stand | Nome | Meccanica |
+|-------|------|-----------|
+| 1 | 🎵 Round Classico (Timeline) | Posiziona la canzone nella timeline |
+| 2 | 🕺 Round Movimento (Decadi) | Corri nell'area della decade giusta |
+| 3 | 🎤 Round Canta Tu (Stop) | Continua a cantare dopo lo stop |
+| 4 | 🧩 Round Indizi (Quiz) | Indovina con indizi senza sentire la musica |
+| 5 | 🏃 Staffetta Mimica | Mimica o canticchia senza parole |
+| 6 | 🔥 Finale Epico (Duello) | Scontro diretto, chi tocca prima risponde |
 
 ---
 
-### Step 1 — Prepara il repository GitHub
+## 🚀 Installazione
 
-```bash
-# Se non hai ancora un repo remoto:
-git init
-git add .
-git commit -m "first commit"
-git branch -M main
-git remote add origin https://github.com/TUO_USERNAME/hitster-camp.git
-git push -u origin main
-```
+### Requisiti
 
-> Se hai già un repo, assicurati che `app.py`, `requirements.txt`, `Procfile` e `render.yaml` siano tutti committati e pushati.
+- PHP 8.x con estensioni: `pdo_mysql`, `curl`
+- MySQL 5.7+ / MariaDB
+- Web server Apache (con `mod_rewrite`) o Nginx
 
----
+### Passaggi
 
-### Step 2 — Ottieni le credenziali Spotify API
+1. **Carica i file** sul server (es. in `/var/www/html/hitster-camp/`)
 
-1. Vai su [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
-2. Clicca **Create App**
-3. Compila:
-   - **App name:** Hitster Camp
-   - **App description:** Quiz musicale
-   - **Redirect URI:** `http://localhost` (non serve realmente, ma è obbligatorio)
-   - **API/SDKs:** spunta *Web API*
-4. Salva e vai in **Settings** → copia **Client ID** e **Client Secret**
+2. **Crea il database** ed esegui lo script SQL:
+   ```sql
+   CREATE DATABASE hitster_camp CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+   USE hitster_camp;
+   SOURCE setup.sql;
+   ```
 
----
+3. **Configura le credenziali DB** in `_private/db_config.php`:
+   ```php
+   <?php
+   define('DB_HOST', 'localhost');
+   define('DB_NAME', 'hitster_camp');
+   define('DB_USER', 'tuo_utente');
+   define('DB_PASS', 'tua_password');
+   ```
 
-### Step 3 — Crea il Web Service su Render
+4. **Crea un'app Spotify** su [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) e prendi `Client ID` e `Client Secret`.
 
-1. Accedi a [dashboard.render.com](https://dashboard.render.com)
-2. Clicca **New +** → **Web Service**
-3. Seleziona **Build and deploy from a Git repository** → clicca **Next**
-4. Autorizza Render ad accedere al tuo GitHub e seleziona il repository `hitster-camp`
-5. Clicca **Connect**
+5. **Accedi al pannello admin** tramite il pulsante "⚙️ Admin Access" nella homepage:
+   - Al primo accesso, inserisci la password master (`hitster-admin` di default)
+   - Scansiona il QR con Google Authenticator per configurare il 2FA
+   - Inserisci le credenziali Spotify nel pannello admin
 
----
+6. **Installa come PWA** (opzionale): usa il pulsante "📱 Guida Installazione" sulla homepage per aggiungere l'app alla schermata home del dispositivo.
 
-### Step 4 — Configura il Web Service
-
-Nella pagina di configurazione imposta:
-
-| Campo | Valore |
-|---|---|
-| **Name** | `hitster-camp` (o come preferisci) |
-| **Region** | Frankfurt (EU Central) — più vicino all'Italia |
-| **Branch** | `main` |
-| **Runtime** | `Python 3` |
-| **Build Command** | `pip install -r requirements.txt` |
-| **Start Command** | `gunicorn --worker-class eventlet -w 1 app:app` |
-| **Instance Type** | Free (o Starter per più stabilità) |
-
-> ⚠️ **Importante:** WebSocket richiede `eventlet` e **un solo worker** (`-w 1`). Non aumentare il numero di worker.
+7. **Verifica la connessione Spotify** visitando `test_spotify.php` dal browser — mostra le playlist scoperte per ogni fascia d'età e i brani trovati.
 
 ---
 
-### Step 5 — Aggiungi le variabili d'ambiente
+## 🔌 API Endpoints
 
-Vai nella sezione **Environment** del servizio e aggiungi:
+Tutte le chiamate passano per `api.php` (POST con body JSON o GET con query string).
 
-| Variabile | Valore | Note |
-|---|---|---|
-| `SPOTIPY_CLIENT_ID` | Il tuo Client ID Spotify | Obbligatorio |
-| `SPOTIPY_CLIENT_SECRET` | Il tuo Client Secret Spotify | Obbligatorio |
-| `SECRET_KEY` | Una stringa casuale lunga | Generata auto da `render.yaml` |
-
-> 💡 In alternativa le credenziali Spotify possono essere inserite anche dal pannello Admin dell'app dopo il deploy.
-
----
-
-### Step 6 — Avvia il deploy
-
-1. Clicca **Create Web Service**
-2. Render esegue automaticamente il build (`pip install -r requirements.txt`)
-3. Aspetta che lo stato diventi **Live** (1–3 minuti)
-4. L'app sarà disponibile su `https://hitster-camp.onrender.com` (o il nome che hai scelto)
-
----
-
-### Step 7 — Configurazione iniziale (primo avvio)
-
-1. Vai su `https://hitster-camp.onrender.com/admin`
-2. Completa il setup **2FA**:
-   - Clicca "Configura 2FA"
-   - Scansiona il QR code con **Google Authenticator** o **Authy**
-   - Inserisci il codice a 6 cifre per verificare
-3. Accedi al pannello admin e inserisci le credenziali Spotify (se non le hai messe come env var)
-4. Verifica le fasce d'età e gli stand → **Salva**
+| Action | Metodo | Descrizione |
+|--------|--------|-------------|
+| `create` | POST | Crea nuova sessione di gioco |
+| `session` | GET | Legge lo stato di una sessione |
+| `next_song` | POST | Pesca la prossima canzone per uno stand |
+| `confirm_song` | POST | Aggiunge la canzone alla timeline (indovinata) |
+| `add_team` | POST | Iscrive una nuova squadra |
+| `remove_team` | POST | Rimuove una squadra |
+| `set_stand` | POST | Assegna le squadre a uno stand |
+| `add_points` | POST | Aggiunge/rimuove punti a una squadra |
+| `reset_scores` | POST | Azzera tutti i punteggi |
+| `delete` | POST | Termina e cancella la sessione |
+| `admin_check` | GET | Controlla stato autenticazione admin |
+| `admin_setup` | POST | Genera il secret TOTP (primo setup) |
+| `admin_verify` | POST | Verifica il codice TOTP e crea la sessione admin |
+| `admin_logout` | GET | Distrugge la sessione admin e reindirizza alla homepage |
+| `reset_2fa` | POST | Azzera il secret TOTP (richiede re-setup) |
 
 ---
 
-### Step 8 — Aggiornamenti futuri
+## 🎧 Integrazione Spotify
 
-Per aggiornare l'app dopo modifiche al codice:
+Il modulo `includes/spotify.php` gestisce tutta la logica musicale:
 
-```bash
-git add .
-git commit -m "descrizione delle modifiche"
-git push origin main
-```
+### Scoperta Dinamica (dalla v1.3.0)
 
-Render rileva automaticamente il push e avvia un **re-deploy** senza downtime.
+Niente più playlist ID o artisti hardcoded. Il sistema usa **Spotify Search API** per scoprire automaticamente il contenuto rilevante:
+
+1. **`build_age_profile()`** costruisce termini di ricerca a partire da `CURRENT_YEAR` (es. `"top 50 italia"`, `"rap italiano 2025"`, ecc.)
+2. **`discover_playlists_for_profile()`** cerca su Spotify le playlist italiane che matchano quei termini → ~12-18 playlist uniche per sessione
+3. I brani vengono raccolti da tutte le playlist scoperte + ricerche dirette di tracce
+4. **Rilevamento artisti italiani automatico**: un artista è considerato "italiano" se appare 2+ volte nelle playlist italiane trovate — nessuna lista da aggiornare manualmente
+
+### Scoring
+
+Ogni brano riceve un punteggio composito:
+
+| Fattore | Punti |
+|---------|-------|
+| Popolarità ≥ 80 | +4 |
+| Popolarità ≥ 70 | +3 |
+| Popolarità ≥ 60 | +2 |
+| Popolarità ≥ 50 | +1 |
+| Uscito nell'anno corrente | +4 |
+| Uscito 2 anni fa | +3 |
+| Uscito 3 anni fa | +2 |
+| Uscito 4-5 anni fa | +1 |
+| Artista italiano (dinamico) | +2 |
+| Contenuto esplicito (fasce giovani) | -3 |
+| Playlist di alta qualità (bonus sorgente) | +1/+2/+3 |
+
+### Cache
+
+- TTL: **30 minuti** per fascia d'età, salvato nella tabella `hitster_song_cache`
+- Alla scadenza, il fetch completo (~20-28 chiamate API) viene rieseguito in background
+- La cache viene invalidata automaticamente salvando una versione vuota su errore
 
 ---
 
-### 🔧 Risoluzione problemi comuni
+## 🔐 Sicurezza
 
-| Problema | Causa | Soluzione |
-|---|---|---|
-| App non si avvia | Worker multipli con SocketIO | Usa `gunicorn -w 1` |
-| WebSocket disconnesso | Eventlet mancante | Verifica `eventlet` in `requirements.txt` |
-| Nessuna canzone trovata | Credenziali Spotify mancanti o errate | Controlla le env var |
-| 2FA non funziona | Orologio di sistema non sincronizzato | Sincronizza l'orario sul tuo dispositivo |
-| App in "sleep" (piano Free) | Render mette in standby dopo 15 min di inattività | Configura UptimeRobot su `/health` ([vedi sotto](#-keepalive-con-uptimerobot)) |
+- **Accesso Admin**: Protetto da TOTP (Google Authenticator) con implementazione RFC 6238 nativa in PHP
+- **`_private/`**: Cartella con credenziali DB bloccata da `.htaccess` (deny all)
+- **Sessioni admin**: Tramite `$_SESSION['is_admin']` lato server
+- **Sessioni di gioco**: Garbage collection automatica dopo 24 ore (`custom_session_gc()`)
+- **XSS**: Tutti gli output HTML usano `htmlspecialchars()` / funzione `esc()` in JS
+- **SQL Injection**: Tutte le query usano prepared statements PDO
 
 ---
 
-## 🤖 Keepalive con UptimeRobot
+## 🔄 Aggiornamenti in Tempo Reale
 
-Il piano **Free di Render** mette l'app in standby dopo ~15 minuti di inattività.
-L'endpoint `/health` è stato creato appositamente per essere pingato da un servizio esterno e mantenere l'app sempre sveglia.
+Il sistema usa un **polling engine** (`PollingEngine` in `base.js`) invece di WebSocket:
+- Intervallo: ogni **2,5 secondi**
+- Ottimizzato: l'update della UI avviene solo se il campo `updated_at` è cambiato
+- Gestisce automaticamente il caso di sessione terminata (redirect a `index.php`)
 
-### Risposta dell'endpoint
+---
 
+## ⚙️ Pannello Admin
+
+Accessibile solo dopo autenticazione 2FA. Permette di:
+- Modificare la **password master**
+- Inserire/aggiornare le credenziali **Spotify API**
+- Aggiungere/modificare le **fasce d'età** (label, età minima, età massima)
+- Resettare il **2FA** (es. cambio dispositivo)
+
+---
+
+## 🩺 Health Check
+
+Endpoint pubblico `health.php` che restituisce:
 ```json
-GET https://hitster-camp.onrender.com/health
-
 {
   "status": "ok",
-  "uptime_seconds": 3742,
-  "active_sessions": 2
+  "uptime_seconds": -1,
+  "active_sessions": 3
 }
 ```
 
-### Setup UptimeRobot (gratuito)
+---
 
-1. Crea un account su [uptimerobot.com](https://uptimerobot.com) — il piano Free è sufficiente
-2. Clicca **+ Add New Monitor**
-3. Compila il form:
+## 📦 Dipendenze Esterne (CDN)
 
-   | Campo | Valore |
-   |---|---|
-   | **Monitor Type** | `HTTP(s)` |
-   | **Friendly Name** | `Hitster Camp Keepalive` |
-   | **URL** | `https://hitster-camp.onrender.com/health` |
-   | **Monitoring Interval** | `5 minutes` |
-   | **Monitor Timeout** | `30 seconds` |
-
-4. Clicca **Create Monitor**
-
-UptimeRobot eseguirà un GET su `/health` ogni 5 minuti — Render riceve la richiesta e non mette in sleep il processo.
-
-> 💡 Nella sezione *Alert Contacts* puoi aggiungere la tua email per ricevere una notifica se l'app va down.
+| Libreria | Versione | Uso |
+|----------|----------|-----|
+| [SweetAlert2](https://sweetalert2.github.io/) | v11 | Dialoghi di conferma e input |
+| [qrcodejs](https://github.com/davidshimjs/qrcodejs) | 1.0.0 | Generazione QR per setup 2FA |
+| [Google Fonts - Outfit](https://fonts.google.com/specimen/Outfit) | — | Tipografia |
 
 ---
 
-## ⚙️ Variabili d'ambiente
+## 📱 PWA (Progressive Web App)
 
-| Variabile | Descrizione | Obbligatorio |
-|---|---|---|
-| `SPOTIPY_CLIENT_ID` | Client ID dell'app Spotify | Sì (o via admin panel) |
-| `SPOTIPY_CLIENT_SECRET` | Client Secret dell'app Spotify | Sì (o via admin panel) |
-| `SECRET_KEY` | Chiave segreta Flask per le sessioni | Sì (auto da render.yaml) |
-
----
-
-## 📁 Struttura progetto
-
-```
-hitster-camp/
-├── app.py              ← Backend Flask + SocketIO + logica canzoni
-├── requirements.txt    ← Dipendenze Python
-├── Procfile            ← Comando di avvio per Render/Heroku
-├── render.yaml         ← Config automatica Render
-├── config.json         ← Configurazione persistente (generato al primo avvio)
-├── CHANGELOG.md        ← Storico delle modifiche
-├── README.md
-└── templates/
-    ├── base.html       ← Layout + stili condivisi
-    ├── home.html       ← Pagina principale
-    ├── admin.html      ← Pannello Admin
-    ├── master.html     ← Pannello Master (coordinatore)
-    └── stand.html      ← Pannello Animatore
-```
+L'app è configurata per essere installata come app standalone:
+- `manifest.json`: nome, icone, colori, modalità `standalone`
+- `sw.js`: Service Worker per cache offline basilare
+- Meta tag Apple per compatibilità iOS (status bar translucente, touch icon)
 
 ---
 
-## ⚙️ Stack tecnico
+# 📋 Changelog
 
-| Layer | Tecnologia |
-|---|---|
-| Backend | Flask + Flask-SocketIO + Eventlet |
-| Real-time | WebSocket via Socket.IO |
-| Autenticazione | TOTP 2FA (pyotp) |
-| Musica | Spotify Web API (Spotipy) |
-| Frontend | HTML + CSS + JS vanilla |
-| Storage | In memoria (nessun database) |
-| Deploy | Render (gunicorn + eventlet) |
+## [v1.3.0] – 2026-06-04
 
----
+> Refactor completo del modulo Spotify: da lista hardcoded a scoperta dinamica.
 
-## 🎮 Regole del gioco
+### Modificato
 
-- I ragazzi sono divisi in **squadre**
-- Il gioco si svolge su **6 stand** contemporanei, ognuno con un round diverso:
-  - 🎵 **Timeline** — Posiziona la canzone nella timeline cronologica
-  - 🕺 **Decadi** — Corri nell'area della decade giusta quando la musica si ferma
-  - 🎤 **Canta Tu** — Continua a cantare dopo lo stop improvviso
-  - 🧩 **Indizi** — Indovina senza ascoltare, solo con gli indizi
-  - 🏃 **Staffetta Mimica** — Fai indovinare mimando (no parole)
-  - 🔥 **Finale Epico** — Duello diretto tra due squadre
-- La **classifica è visibile in tempo reale** su tutti i dispositivi connessi
+- **`includes/spotify.php`** – Refactor architetturale completo:
+  - **Rimossa** costante `ITALIAN_ARTISTS` (~80 artisti hardcoded)
+  - **Rimossa** costante `PLAYLIST_CATALOG` (6 ID playlist fissi)
+  - **Rimossa** funzione `is_likely_italian()` (dipendeva dalla lista hardcoded)
+  - **Aggiunta** `discover_playlists_for_profile()`: cerca playlist italiane su Spotify in tempo reale tramite Search API, restituisce una mappa `playlist_id => source_bonus`
+  - **Riscritta** `build_age_profile()`: tutte le query sono ora costruite dinamicamente da `CURRENT_YEAR` — nessun anno hardcoded, si aggiorna automaticamente ogni anno
+  - **Riscritta** `fetch_songs_smart()`: flusso in due fasi — (1) raccolta brani e conteggio frequenza artisti, (2) scoring finale con set italiano determinato dinamicamente (artisti con 2+ apparizioni nelle playlist italiane scoperte)
+  - **Modificata** `score_track()`: ora riceve `array $italian_set = []` come parametro invece di chiamare `is_likely_italian()`
+  - **Invariate**: `spotify_get_token()`, `spotify_request()`, `get_cached_songs()`
+- **`test_spotify.php`** – Aggiornato per testare il nuovo sistema: mostra le playlist scoperte (nome, followers, bonus) per ogni fascia d'età e i top 10 brani trovati
 
-### Sistema punti
-| Evento | Punti |
-|---|---|
-| Risposta corretta | +1 |
-| Bonus (anno esatto / 1° colpo / meno di 15s) | +3 |
-| Risposta sbagliata | -1 |
+### Stima impatto
+
+- ~20-28 chiamate API per fetch completo (vs ~14 precedenti), tutte cachate 30 min
+- Le playlist si aggiornano automaticamente a ogni refresh della cache
+- Gli artisti "italiani" vengono riconosciuti senza manutenzione manuale
 
 ---
 
-## 📋 Changelog
+## [v1.2.0] – 2026-06-04 (Versione Server)
 
-Vedi [CHANGELOG.md](./CHANGELOG.md) per lo storico completo delle modifiche.
+> Aggiornamenti applicati direttamente sul server di produzione rispetto alla v1.1.0 locale.
+
+### Aggiunto
+
+- **`test_spotify.php`**: script di diagnostica per verificare la connettività Spotify — testa il token sia con SSL verification attiva che disabilitata, e stampa la risposta HTTP in plain text. Utile per debug su hosting condivisi
+- **`robots.txt`**: aggiunto file con regole `Crawl-delay: 5` per MSNBot e Bingbot, per limitare la frequenza di scansione dei crawler Microsoft
+- **`.htaccess` — URL rewrite rules**: aggiunte due regole per URL pulite: `/master/CODE` → `master.php?code=CODE` e `/stand/CODE` → `stand.php?code=CODE`. Aggiunto anche blocco `403` per accesso diretto a `/includes/`
+
+### Modificato
+
+- **`includes/spotify.php`**: aggiunto `CURLOPT_SSL_VERIFYPEER => false` su entrambe le funzioni `spotify_get_token()` e `spotify_request()` per evitare errori di certificati SSL tipici degli hosting condivisi
+- **`includes/spotify.php` — `get_cached_songs()`**: aggiunto controllo `!empty($songs)` prima di scrivere in cache (evita di salvare array vuoti in caso di errore Spotify) e prima di fare shuffle sul risultato
+- **`includes/session_store.php`**: rinominata `session_gc()` in `custom_session_gc()` per evitare conflitti con la funzione nativa PHP `session_gc()`
+- **`api.php`**: aggiornata la chiamata da `session_gc()` a `custom_session_gc()`. Aggiunto controllo esplicito su `empty($songs)` nell'action `create` con risposta JSON di errore dettagliata invece di procedere silenziosamente con coda vuota
+- **`index.php`**: l'alert di errore nella form di creazione usa ora `json.message` (se presente) al posto del generico "Errore durante la creazione."
+- **`api.php` — `admin_logout`**: usa `unset($_SESSION['is_admin'])` invece di `session_destroy()` — approccio più corretto che preserva la sessione PHP rimuovendo solo il flag admin
+
+### Note di Sicurezza
+
+> [!WARNING]
+> `CURLOPT_SSL_VERIFYPEER => false` disabilita la verifica del certificato SSL nelle chiamate a Spotify. Necessario su hosting condivisi con bundle CA mancante o obsoleto, ma idealmente da risolvere aggiornando il bundle `cacert.pem` sul server.
+
+---
+
+## [v1.1.0] – 2026-06-04
+
+### Corretto
+
+- **`manifest.json`**: percorso icona corretto da `/static/icon.png` a `assets/img/icon.png` (residuo del porting da Python/FastAPI). Aggiornati anche `start_url` (`./index.php`), `background_color` e `theme_color` per coerenza con il design system
+- **`sw.js`**: percorsi asset corretti da `/static/...` ai percorsi reali (`assets/img/icon.png`, `assets/css/style.css`, `assets/js/base.js`). Aggiunto listener `activate` per pulizia automatica delle cache obsolete. Versione cache bumped a `v2`
+- **`api.php`**: aggiunta action `admin_logout` mancante — il pulsante Logout in `admin.php` puntava a `api.php?action=admin_logout` ma il case non esisteva, lasciando la sessione admin attiva. Ora distrugge correttamente la sessione e reindirizza a `index.php`
+- **`includes/config.php`**: rimossa la sovrascrittura forzata di `stands_info` con i valori di default ad ogni caricamento. La configurazione degli stand salvata sul DB viene ora rispettata; i valori di default si applicano solo al primo avvio o se `stands_info` è mancante (compatibilità con installazioni precedenti)
+
+---
+
+## [v1.0.0] – 2026-06-04
+
+> Versione iniziale – Porting completo da Python/FastAPI a PHP puro + MySQL
+
+### Aggiunto
+
+- **Homepage** (`index.php`): selezione fascia d'età, creazione partita, join con codice
+- **Master Dashboard** (`master.php`): classifica live, stato stand, link per animatori
+- **Stand Panel** (`stand.php`): configurazione stand, player Spotify, timeline, punteggi
+- **Pannello Admin** (`admin.php`): configurazione Spotify, fasce d'età, gestione 2FA
+- **API REST** (`api.php`): 15 endpoint per tutte le operazioni di gioco
+- **Integrazione Spotify**: token OAuth2, fetch intelligente per fascia d'età, scoring, cache DB
+- **TOTP 2FA** (`includes/totp.php`): implementazione RFC 6238 nativa, compatibile con Google Authenticator
+- **Polling Engine** (`base.js`): aggiornamenti in tempo reale ogni 2,5s senza WebSocket
+- **Macchina degli Indizi** (stand 4): generatore di indizi contestuali sul titolo/artista/anno
+- **Visualizzatore Timeline** (stand 1): mostra le canzoni indovinate in ordine cronologico con suggerimento posizione
+- **Design System** (`style.css`): dark mode ispirata a iOS, glassmorphism, palette coerente
+- **PWA**: manifest + service worker per installazione su mobile
+- **Health Check** (`health.php`): endpoint per monitoraggio sessioni attive
+- **Garbage Collection**: pulizia automatica sessioni scadute (> 24h)
+- **Guida Installazione**: modal contestuale per iOS e Android
+- **Sicurezza `_private/`**: credenziali DB isolate fuori dalla webroot
+
+---
+
+*Progetto sviluppato per uso interno nei campi estivi. © 2026 Hitster Camp.*

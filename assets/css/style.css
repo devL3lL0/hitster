@@ -1,0 +1,119 @@
+/* assets/css/style.css */
+:root {
+  --bg: #000000;
+  --bg-gradient: radial-gradient(circle at 50% -20%, #1c1c1e 0%, #000000 100%);
+  --surface: rgba(28, 28, 30, 0.7);
+  --surface-border: rgba(255, 255, 255, 0.12);
+  --accent: #0a84ff; 
+  --accent-glow: rgba(10, 132, 255, 0.3);
+  --gold: #ffd60a;
+  --rose: #ff453a;
+  --emerald: #32d74b;
+  --cyan: #64d2ff;
+  --text-main: #ffffff;
+  --text-muted: #8e8e93;
+  --radius-lg: 28px;
+  --radius-md: 18px;
+  --font-body: -apple-system, BlinkMacSystemFont, 'Outfit', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-head: -apple-system, BlinkMacSystemFont, 'Outfit', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+body { background: var(--bg); background-image: var(--bg-gradient); color: var(--text-main); font-family: var(--font-body); min-height: 100vh; padding-bottom: env(safe-area-inset-bottom); }
+
+.app-header {
+  display: flex; align-items: center; justify-content: space-between; padding: 1.5rem;
+  background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
+  border-bottom: 0.5px solid var(--surface-border); position: sticky; top: 0; z-index: 1000;
+  padding-top: max(1.5rem, env(safe-area-inset-top));
+}
+.app-logo { display:flex; align-items:center; gap:0.75rem; text-decoration:none; font-family:var(--font-head); font-weight:800; font-size:1.5rem; color:var(--text-main); letter-spacing:-1px; }
+.app-logo img { width:34px; height:34px; border-radius:9px; }
+.app-logo span { color: var(--accent); }
+
+.badge-code { background:rgba(255,255,255,0.1); color:white; font-weight:700; padding:0.5rem 1rem; border-radius:14px; font-size:0.9rem; border:0.5px solid var(--surface-border); }
+
+.container { max-width: 650px; margin: 0 auto; padding: 2.5rem 1.5rem 8rem; }
+
+.card { background: var(--surface); border: 0.5px solid var(--surface-border); border-radius: var(--radius-lg); padding: 2rem; margin-bottom: 1.5rem; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+.card h2 { font-family: var(--font-head); font-size: 1.4rem; font-weight: 700; margin-bottom: 1.25rem; }
+
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:0.5rem; padding:1rem 1.75rem; border-radius:18px; border:none; font-family:var(--font-body); font-weight:600; cursor:pointer; transition:all 0.3s cubic-bezier(0.25, 0.1, 0.25, 1); text-decoration:none; font-size:1.05rem; }
+.btn:active { transform: scale(0.96); }
+.btn-primary { background:var(--accent); color:white; }
+.btn-gold { background:var(--gold); color:#000; }
+.btn-rose { background:var(--rose); color:white; }
+.btn-emerald { background:var(--emerald); color:white; }
+.btn-ghost { background:rgba(255, 255, 255, 0.08); color:var(--text-main); border:0.5px solid var(--surface-border); }
+.btn-full { width: 100%; }
+.btn-sm { padding: 0.6rem 1.25rem; font-size: 0.9rem; border-radius: 14px; }
+
+input, select, textarea { 
+  background: rgba(255, 255, 255, 0.05); 
+  border: 1px solid var(--surface-border); 
+  color: white; 
+  padding: 1.1rem 1.4rem; 
+  border-radius: 18px; 
+  font-family: var(--font-body); 
+  font-size: 1.1rem; 
+  width: 100%; 
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); 
+  appearance: none;
+  -webkit-appearance: none;
+}
+textarea {
+  resize: vertical;
+  min-height: 100px;
+  line-height: 1.5;
+}
+select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%238e8e93' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: calc(100% - 1.2rem) center;
+  padding-right: 3rem;
+}
+option { background: #1c1c1e; color: white; }
+input:focus, select:focus, textarea:focus { 
+  outline:none; 
+  border-color:var(--accent); 
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow:0 0 0 4px var(--accent-glow); 
+}
+
+::placeholder { color: rgba(255,255,255,0.3); }
+
+#toast { position:fixed; top:2rem; left:50%; transform:translateX(-50%) translateY(-100px); background:rgba(44, 44, 46, 0.9); backdrop-filter:blur(20px); color:white; padding:0.8rem 1.75rem; border-radius:50px; font-weight:600; border:0.5px solid var(--surface-border); transition:all 0.5s; z-index:2000; display:flex; gap:0.75rem; }
+#toast.show { transform:translateX(-50%) translateY(0); }
+#toast.error { border-color: var(--rose); }
+
+.modal-overlay { position:fixed; inset:0; background:rgba(0, 0, 0, 0.6); backdrop-filter:blur(15px); display:none; place-items:center; padding:1.5rem; z-index:3000; animation: fadeIn 0.3s ease; }
+.modal { background:#1c1c1e; border:0.5px solid var(--surface-border); border-radius:32px; width:100%; max-width:420px; padding:2.5rem; text-align:center; box-shadow:0 30px 60px rgba(0, 0, 0, 0.5); }
+.modal h2 { font-weight:800; margin-bottom:1.5rem; }
+
+.rank-item { display:flex; align-items:center; gap:1.25rem; padding:1.25rem; background:rgba(255, 255, 255, 0.04); border-radius:22px; margin-bottom:0.75rem; border:0.5px solid transparent; }
+.rank-pos { font-weight:800; font-size:1.5rem; width:2.5rem; text-align:center; color:var(--text-muted); }
+.rank-name { flex:1; font-weight:600; font-size:1.15rem; }
+.rank-score { font-family:var(--font-head); font-weight:800; font-size:1.8rem; color:var(--accent); }
+
+.muted { color: var(--text-muted); font-size: 0.95rem; }
+.text-center { text-align: center; }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Estetica specifica del QR */
+#qrcode img { display: block; margin: 0 auto; border-radius: 12px; }
+
+/* ── CUSTOM SWEETALERT ── */
+.swal2-popup {
+  background: rgba(28, 28, 30, 0.9) !important;
+  backdrop-filter: blur(25px) !important;
+  -webkit-backdrop-filter: blur(25px) !important;
+  border: 0.5px solid var(--surface-border) !important;
+  border-radius: 30px !important;
+  color: white !important;
+  font-family: var(--font-body) !important;
+}
+.swal2-title { font-weight: 800 !important; letter-spacing: -0.5px; }
+.swal2-confirm { background-color: var(--accent) !important; border-radius: 15px !important; font-weight: 700 !important; }
+.swal2-cancel { background-color: rgba(255,255,255,0.1) !important; border-radius: 15px !important; font-weight: 700 !important; color: white !important; }

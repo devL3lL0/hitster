@@ -1,0 +1,11 @@
+<?php
+// .htaccess to block direct access to includes folder
+// File content for f:\leo_spese\hitster-camp-php\includes\.htaccess
+// Require all denied
+// <IfModule mod_authz_core.c>
+//     Require all denied
+// </IfModule>
+// <IfModule !mod_authz_core.c>
+//     Order deny,allow
+//     Deny from all
+// </IfModule>

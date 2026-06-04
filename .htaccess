@@ -1,0 +1,6 @@
+RewriteEngine On
+
+RewriteRule ^includes/ - [F,L]
+
+RewriteRule ^master/([a-zA-Z0-9]{6})$ master.php?code=$1 [QSA,L]
+RewriteRule ^stand/([a-zA-Z0-9]{6})$ stand.php?code=$1 [QSA,L]
