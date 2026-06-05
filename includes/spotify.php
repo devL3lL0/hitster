@@ -50,6 +50,48 @@ function spotify_request($url, $token) {
     return json_decode($result, true) ?? [];
 }
 
+// ─── Age Group Helper ────────────────────────────────────────────────────────
+// Converte un range numerico (es. 14, 17) nel gruppo usato in DB e nei profili.
+
+function age_range_to_group($min_age, $max_age) {
+    $avg = ($min_age + $max_age) / 2;
+    if ($avg <= 11) return '8-11';
+    if ($avg <= 14) return '12-14';
+    if ($avg <= 17) return '14-17';
+    if ($avg <= 22) return '18-22';
+    return '23+';
+}
+
+// ─── DB Seed Loader ───────────────────────────────────────────────────────────
+// Carica gli artisti seed attivi per una fascia d'età dal database.
+
+function load_artist_seeds($age_group) {
+    $db   = DB::getInstance();
+    $stmt = $db->prepare(
+        "SELECT spotify_id, artist_name, genre FROM hitster_artist_seeds
+          WHERE age_group = ? AND active = 1
+          ORDER BY popularity DESC"
+    );
+    $stmt->execute([$age_group]);
+    return $stmt->fetchAll();
+}
+
+// ─── Artist Top Tracks Fetcher ────────────────────────────────────────────────
+// Per ogni artista seed, recupera le sue top-tracks nel mercato italiano.
+// Queste canzoni hanno source_bonus = 4 (il massimo) per privilegiarle nel rank.
+
+function fetch_artist_top_tracks(array $seeds, $token) {
+    $tracks = [];
+    foreach ($seeds as $seed) {
+        $url = "https://api.spotify.com/v1/artists/{$seed['spotify_id']}/top-tracks?market=IT";
+        $res = spotify_request($url, $token);
+        foreach ($res['tracks'] ?? [] as $t) {
+            $tracks[] = [$t, 4]; // source_bonus massimo: artista italiano certificato
+        }
+    }
+    return $tracks;
+}
+
 // ─── Dynamic Age Profile ──────────────────────────────────────────────────────
 // Costruisce i termini di ricerca in modo dinamico a partire da CURRENT_YEAR.
 // Nessun anno o ID playlist è hardcoded: tutto viene calcolato al runtime.
@@ -287,6 +329,18 @@ function fetch_songs_smart($min_age, $max_age, $token) {
             $raw[$tid] = [$td, $bonus];
         }
     };
+
+    // ── 0. Artisti seed dal DB → top-tracks italiane (source_bonus massimo) ────
+    // Questi brani vanno sicuramente in cima: sono top-tracks di artisti italiani
+    // noti per questa fascia d'età, certificati dal refresh periodico.
+    $age_group = age_range_to_group($min_age, $max_age);
+    $seeds     = load_artist_seeds($age_group);
+    if (!empty($seeds)) {
+        $seed_tracks = fetch_artist_top_tracks($seeds, $token);
+        foreach ($seed_tracks as [$t, $bonus]) {
+            $ingest($t, $bonus);
+        }
+    }
 
     // ── 1. Scoperta playlist dinamica ────────────────────────────────────────
     $playlist_map = discover_playlists_for_profile($profile, $token);

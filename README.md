@@ -21,7 +21,8 @@ hitster-camp-php/
 ├── api.php                # API REST JSON (tutte le azioni di gioco)
 ├── health.php             # Endpoint di health-check
 ├── test_spotify.php       # Script di diagnostica connessione Spotify (debug)
-├── setup.sql              # Script SQL per creare le tabelle
+├── migrate.php            # Script per l'esecuzione manuale (via browser/CLI) delle migrazioni DB
+├── setup.sql              # Script SQL base (ora gestito principalmente tramite migrazioni)
 ├── manifest.json          # Manifesto PWA (installabile come app)
 ├── sw.js                  # Service Worker (cache offline base)
 ├── robots.txt             # Regole crawler (delay per Bing/MSN)
@@ -29,9 +30,14 @@ hitster-camp-php/
 ├── _private/
 │   ├── db_config.php      # Credenziali database (fuori dalla webroot)
 │   └── .htaccess          # Blocca accesso diretto alla cartella
+├── cron/
+│   ├── refresh_seeds.php  # Endpoint protetto da token per UptimeRobot (refresh artisti)
+│   └── .htaccess          # Blocca l'accesso a tutto tranne refresh_seeds.php
 ├── includes/
-│   ├── db.php             # Singleton PDO (connessione MySQL)
 │   ├── config.php         # Caricamento/salvataggio config da DB, stand e fasce d'età
+│   ├── db.php             # Singleton PDO (connessione MySQL)
+│   ├── lastfm.php         # Integrazione Last.fm API per scoperta tag e chart geografiche
+│   ├── migrations.php     # Motore di migrazione DB (idempotente e versionato)
 │   ├── session_store.php  # CRUD sessioni di gioco su DB
 │   ├── spotify.php        # Integrazione Spotify API (token, discovery dinamica, scoring)
 │   └── totp.php           # Implementazione TOTP RFC 6238 (2FA admin)
@@ -136,21 +142,22 @@ Tutte le chiamate passano per `api.php` (POST con body JSON o GET con query stri
 | `admin_verify` | POST | Verifica il codice TOTP e crea la sessione admin |
 | `admin_logout` | GET | Distrugge la sessione admin e reindirizza alla homepage |
 | `reset_2fa` | POST | Azzera il secret TOTP (richiede re-setup) |
+| `run_migrations` | POST | (Admin) Esegue manualmente le migrazioni DB pending |
+| `seed_*` | POST | (Admin) API per gestione artisti seed (add, toggle, delete, refresh) |
+| `service_*` | POST | (Admin) API per gestione servizi cron (add, toggle, delete, regen_token) |
 
 ---
 
-## 🎧 Integrazione Spotify
+## 🎧 Integrazione Musicale (Spotify + Last.fm)
 
-Il modulo `includes/spotify.php` gestisce tutta la logica musicale:
+Il modulo `includes/spotify.php` (assieme a `lastfm.php`) gestisce tutta la logica musicale.
 
-### Scoperta Dinamica (dalla v1.3.0)
+### Scoperta Dinamica e Artisti Seed (dalla v1.4.0)
 
-Niente più playlist ID o artisti hardcoded. Il sistema usa **Spotify Search API** per scoprire automaticamente il contenuto rilevante:
+Il sistema utilizza un doppio livello per garantire brani pertinenti all'età e al mercato italiano:
 
-1. **`build_age_profile()`** costruisce termini di ricerca a partire da `CURRENT_YEAR` (es. `"top 50 italia"`, `"rap italiano 2025"`, ecc.)
-2. **`discover_playlists_for_profile()`** cerca su Spotify le playlist italiane che matchano quei termini → ~12-18 playlist uniche per sessione
-3. I brani vengono raccolti da tutte le playlist scoperte + ricerche dirette di tracce
-4. **Rilevamento artisti italiani automatico**: un artista è considerato "italiano" se appare 2+ volte nelle playlist italiane trovate — nessuna lista da aggiornare manualmente
+1. **Artisti Seed Dinamici**: Un cron job popola periodicamente una tabella di artisti italiani (usando incroci tra *Spotify Category Playlists* e tag di *Last.fm* come "rap italiano"). Le *Top Tracks* di questi artisti formano il cuore solido della sessione.
+2. **Playlist Discovery**: Per garantire varietà, `build_age_profile()` costruisce query dinamiche (es. `"top 50 italia"`, `"rap italiano 2026"`) e pesca brani freschi da playlist di terze parti.
 
 ### Scoring
 
@@ -241,6 +248,23 @@ L'app è configurata per essere installata come app standalone:
 ---
 
 # 📋 Changelog
+
+## [v1.4.0] – 2026-06-05
+
+> Aggiunto sistema di migrazione DB, artisti seed dinamici auto-aggiornanti tramite Cron/Last.fm, e gestione avanzata dal pannello Admin.
+
+### Aggiunto
+- **Motore di Migrazione DB** (`includes/migrations.php`, `migrate.php`): Le modifiche allo schema del database sono ora versionate e idempotenti. Le migrazioni pendenti vengono applicate automaticamente aprendo il pannello Admin.
+- **Sistema Artisti Seed Dinamico**: Gli artisti italiani per fascia d'età vengono ora auto-scoperti e popolati in una nuova tabella DB (`hitster_artist_seeds`) combinando le playlist editoriali di Spotify e le API di **Last.fm** (tag e classifiche geografiche).
+- **Cron Endpoint sicuro** (`cron/refresh_seeds.php`): Creato endpoint protetto da token configurabile per servizi di uptime (es. UptimeRobot) che si occupa di eseguire in background l'aggiornamento massivo degli artisti seed.
+- **Gestione Servizi Cron nell'Admin**: Nuova interfaccia per generare token di sicurezza per UptimeRobot e gestire i permessi dei servizi esterni.
+- **Gestione Artisti nell'Admin**: Possibilità di aggiungere manualmente artisti cercandoli su Spotify, disabilitarli o forzare un "Refresh automatico" dell'intera lista.
+
+### Modificato
+- `spotify.php`: Il flow di scoperta canzoni (`fetch_songs_smart`) è stato aggiornato. Ora dà priorità assoluta (source bonus massimo) alle Top Tracks degli artisti seed estratti dal DB, completando poi con la vecchia logica di scoperta dinamica delle playlist per la "coda lunga".
+- `setup.sql` (storico): Aggiornato per riflettere le tabelle `hitster_migrations`, `hitster_artist_seeds`, `hitster_seed_refresh_log`, e `hitster_cron_services` (tuttavia le installazioni esistenti useranno il meccanismo di migrazione automatica).
+
+---
 
 ## [v1.3.0] – 2026-06-04
 

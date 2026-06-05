@@ -7,6 +7,7 @@ require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/spotify.php';
 require_once __DIR__ . '/includes/session_store.php';
 require_once __DIR__ . '/includes/totp.php';
+require_once __DIR__ . '/includes/migrations.php';
 
 $action = $_GET['action'] ?? '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -67,6 +68,17 @@ switch ($action) {
         $config['totp_secret'] = "";
         save_config($config);
         echo json_encode(["ok" => true]);
+        break;
+
+    case 'run_migrations':
+        if (empty($_SESSION['is_admin'])) { http_response_code(403); echo json_encode(["error"=>"403"]); exit; }
+        $result = run_migrations();
+        echo json_encode([
+            'applied' => $result['applied'],
+            'skipped' => $result['skipped'],
+            'errors'  => $result['errors'],
+            'log'     => $result['log'],
+        ]);
         break;
 
     case 'create':
@@ -238,8 +250,166 @@ switch ($action) {
         echo json_encode(["ok" => true]);
         break;
 
+    // ─── Artist Seeds ─────────────────────────────────────────────────────────
+
+    case 'seed_add':
+        if (empty($_SESSION['is_admin'])) { http_response_code(403); echo json_encode(["error"=>"403"]); exit; }
+        $artist_name = trim($body['artist_name'] ?? '');
+        $age_group   = trim($body['age_group']   ?? '');
+        if (!$artist_name || !$age_group) { http_response_code(400); echo json_encode(["error"=>"Missing fields"]); exit; }
+
+        // Cerca l'artista su Spotify
+        $sp_token = spotify_get_token($config['spotify']['client_id'], $config['spotify']['client_secret']);
+        $search_url = "https://api.spotify.com/v1/search?q=artist:" . urlencode($artist_name) . "&type=artist&market=IT&limit=3";
+        $search_res = spotify_request($search_url, $sp_token);
+        $found_artist = null;
+        foreach ($search_res['artists']['items'] ?? [] as $candidate) {
+            similar_text(mb_strtolower($artist_name), mb_strtolower($candidate['name']), $pct);
+            if ($pct >= 70) { $found_artist = $candidate; break; }
+        }
+        if (!$found_artist) { echo json_encode(["error"=>"Artista non trovato su Spotify. Prova con il nome esatto."]); exit; }
+
+        $db = DB::getInstance();
+        try {
+            $now = time();
+            $db->prepare("INSERT INTO hitster_artist_seeds (artist_name,spotify_id,age_group,popularity,source,active,created_at,updated_at) VALUES (?,?,?,?,'admin',1,?,?)")
+               ->execute([$found_artist['name'], $found_artist['id'], $age_group, $found_artist['popularity']??0, $now, $now]);
+            echo json_encode(["status"=>"ok", "artist_name"=>$found_artist['name']]);
+        } catch (Exception $e) {
+            echo json_encode(["error"=>"Artista già presente per questa fascia d'età."]);
+        }
+        break;
+
+    case 'seed_toggle':
+        if (empty($_SESSION['is_admin'])) { http_response_code(403); echo json_encode(["error"=>"403"]); exit; }
+        $db = DB::getInstance();
+        $db->prepare("UPDATE hitster_artist_seeds SET active=?, updated_at=? WHERE id=?")
+           ->execute([(int)($body['active']??0), time(), (int)($body['id']??0)]);
+        echo json_encode(["status"=>"ok"]);
+        break;
+
+    case 'seed_delete':
+        if (empty($_SESSION['is_admin'])) { http_response_code(403); echo json_encode(["error"=>"403"]); exit; }
+        $db = DB::getInstance();
+        $stmt = $db->prepare("SELECT source FROM hitster_artist_seeds WHERE id=?");
+        $stmt->execute([(int)($body['id']??0)]);
+        $row = $stmt->fetch();
+        if (!$row) { echo json_encode(["error"=>"Not found"]); exit; }
+        if ($row['source'] !== 'admin') { echo json_encode(["error"=>"Solo gli artisti aggiunti manualmente possono essere eliminati."]); exit; }
+        $db->prepare("DELETE FROM hitster_artist_seeds WHERE id=?")->execute([(int)$body['id']]);
+        echo json_encode(["status"=>"ok"]);
+        break;
+
+    case 'seeds_refresh':
+        if (empty($_SESSION['is_admin'])) { http_response_code(403); echo json_encode(["error"=>"403"]); exit; }
+        // Include la stessa logica del cron endpoint, senza rate-limit (è admin)
+        require_once __DIR__ . '/includes/lastfm.php';
+        $start_t = microtime(true);
+        $sp_token = spotify_get_token($config['spotify']['client_id'], $config['spotify']['client_secret']);
+        if (!$sp_token) { echo json_encode(["error"=>"Impossibile ottenere token Spotify"]); exit; }
+
+        $lastfm_key = $config['lastfm']['api_key'] ?? null;
+        $age_group_config = [
+            '8-11'  => ['spotify_categories'=>['pop','family'],              'min_popularity'=>60,'max_artists'=>25],
+            '12-14' => ['spotify_categories'=>['pop','toplists'],            'min_popularity'=>58,'max_artists'=>25],
+            '14-17' => ['spotify_categories'=>['hiphop','pop','indie_alt'],  'min_popularity'=>55,'max_artists'=>30],
+            '18-22' => ['spotify_categories'=>['hiphop','indie_alt','pop'],  'min_popularity'=>50,'max_artists'=>30],
+            '23+'   => ['spotify_categories'=>['pop','decades','romance'],   'min_popularity'=>45,'max_artists'=>25],
+        ];
+        $all_results = [];
+        $db = DB::getInstance();
+        $now = time();
+        foreach ($age_group_config as $age_group => $cfg) {
+            $candidates = [];
+            foreach ($cfg['spotify_categories'] as $cat) {
+                $cat_res = spotify_request("https://api.spotify.com/v1/browse/categories/{$cat}/playlists?country=IT&limit=3", $sp_token);
+                foreach ($cat_res['playlists']['items'] ?? [] as $pl) {
+                    if (empty($pl['id'])) continue;
+                    $tr = spotify_request("https://api.spotify.com/v1/playlists/{$pl['id']}/tracks?limit=100&market=IT&fields=items(track(artists,popularity))", $sp_token);
+                    foreach ($tr['items'] ?? [] as $item) {
+                        $track = $item['track'] ?? null;
+                        if (empty($track['artists'][0]['id'])) continue;
+                        $aid = $track['artists'][0]['id'];
+                        $pop = $track['popularity'] ?? 0;
+                        if (!isset($candidates[$aid])) $candidates[$aid]=['name'=>$track['artists'][0]['name'],'freq'=>0,'popularity'=>$pop,'genre'=>$cat];
+                        $candidates[$aid]['freq']++;
+                        $candidates[$aid]['popularity'] = max($candidates[$aid]['popularity'], $pop);
+                    }
+                }
+            }
+            if (!empty($lastfm_key)) {
+                $lnames = lastfm_get_top_artists_italy($lastfm_key, 40);
+                foreach (lastfm_tags_for_age_group($age_group) as $tag) $lnames = array_merge($lnames, lastfm_get_artists_by_tag($tag, $lastfm_key, 30));
+                foreach (array_unique(array_slice($lnames, 0, 50)) as $lname) {
+                    $sr = spotify_request("https://api.spotify.com/v1/search?q=artist:".urlencode($lname)."&type=artist&market=IT&limit=1", $sp_token);
+                    $fa = $sr['artists']['items'][0] ?? null;
+                    if (empty($fa['id'])) continue;
+                    similar_text(mb_strtolower($lname), mb_strtolower($fa['name']), $pct);
+                    if ($pct < 75) continue;
+                    $aid = $fa['id'];
+                    if (!isset($candidates[$aid])) $candidates[$aid]=['name'=>$fa['name'],'freq'=>0,'popularity'=>$fa['popularity']??0,'genre'=>'lastfm'];
+                    $candidates[$aid]['freq'] += 2;
+                    $candidates[$aid]['popularity'] = max($candidates[$aid]['popularity'], $fa['popularity']??0);
+                }
+            }
+            $filtered = array_filter($candidates, fn($c)=>$c['freq']>=2 && $c['popularity']>=$cfg['min_popularity']);
+            uasort($filtered, fn($a,$b)=>($b['freq']*$b['popularity'])<=>($a['freq']*$a['popularity']));
+            $top = array_slice($filtered, 0, $cfg['max_artists'], true);
+            $added=$updated=0;
+            foreach ($top as $sid => $data) {
+                $chk=$db->prepare("SELECT id,source FROM hitster_artist_seeds WHERE spotify_id=? AND age_group=?");
+                $chk->execute([$sid,$age_group]); $ex=$chk->fetch();
+                if ($ex) { if($ex['source']==='admin') continue; $db->prepare("UPDATE hitster_artist_seeds SET popularity=?,updated_at=? WHERE id=?")->execute([$data['popularity'],$now,$ex['id']]); $updated++; }
+                else { $db->prepare("INSERT INTO hitster_artist_seeds (artist_name,spotify_id,age_group,genre,popularity,source,active,created_at,updated_at) VALUES(?,?,?,?,?,'auto',1,?,?)")->execute([$data['name'],$sid,$age_group,$data['genre'],$data['popularity'],$now,$now]); $added++; }
+            }
+            $all_results[$age_group]=['found'=>count($top),'added'=>$added,'updated'=>$updated];
+        }
+        $db->exec("DELETE FROM hitster_song_cache");
+        $dur=(int)round((microtime(true)-$start_t)*1000);
+        $tf=array_sum(array_column($all_results,'found')); $ta=array_sum(array_column($all_results,'added')); $tu=array_sum(array_column($all_results,'updated'));
+        $db->prepare("INSERT INTO hitster_seed_refresh_log (triggered_by,service_name,artists_found,artists_added,artists_updated,duration_ms,ran_at) VALUES('admin','admin',?,?,?,?,?)")->execute([$tf,$ta,$tu,$dur,$now]);
+        echo json_encode(["status"=>"ok","duration_ms"=>$dur,"totals"=>["found"=>$tf,"added"=>$ta,"updated"=>$tu],"by_age_group"=>$all_results]);
+        break;
+
+    // ─── Cron Services ────────────────────────────────────────────────────────
+
+    case 'service_add':
+        if (empty($_SESSION['is_admin'])) { http_response_code(403); echo json_encode(["error"=>"403"]); exit; }
+        $svc_name = trim($body['service_name'] ?? '');
+        $svc_desc = trim($body['description']  ?? '');
+        if (!$svc_name) { echo json_encode(["error"=>"Nome servizio obbligatorio"]); exit; }
+        $token = bin2hex(random_bytes(32)); // 64 chars hex
+        $db = DB::getInstance();
+        $db->prepare("INSERT INTO hitster_cron_services (service_name,token,description,active,created_at) VALUES(?,?,?,1,?)")
+           ->execute([$svc_name, $token, $svc_desc, time()]);
+        echo json_encode(["status"=>"ok", "token"=>$token]);
+        break;
+
+    case 'service_toggle':
+        if (empty($_SESSION['is_admin'])) { http_response_code(403); echo json_encode(["error"=>"403"]); exit; }
+        $db = DB::getInstance();
+        $db->prepare("UPDATE hitster_cron_services SET active=? WHERE id=?")->execute([(int)($body['active']??0),(int)($body['id']??0)]);
+        echo json_encode(["status"=>"ok"]);
+        break;
+
+    case 'service_delete':
+        if (empty($_SESSION['is_admin'])) { http_response_code(403); echo json_encode(["error"=>"403"]); exit; }
+        $db = DB::getInstance();
+        $db->prepare("DELETE FROM hitster_cron_services WHERE id=?")->execute([(int)($body['id']??0)]);
+        echo json_encode(["status"=>"ok"]);
+        break;
+
+    case 'service_regen_token':
+        if (empty($_SESSION['is_admin'])) { http_response_code(403); echo json_encode(["error"=>"403"]); exit; }
+        $new_token = bin2hex(random_bytes(32));
+        $db = DB::getInstance();
+        $db->prepare("UPDATE hitster_cron_services SET token=? WHERE id=?")->execute([$new_token,(int)($body['id']??0)]);
+        echo json_encode(["status"=>"ok", "token"=>$new_token]);
+        break;
+
     default:
         http_response_code(400);
         echo json_encode(["error" => "Invalid action"]);
         break;
 }
+

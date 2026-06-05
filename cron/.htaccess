@@ -1,0 +1,10 @@
+# Deny all access to this directory except the specific cron endpoint
+Options -Indexes
+
+<Files "refresh_seeds.php">
+    Require all granted
+</Files>
+
+<FilesMatch "^(?!refresh_seeds\.php$)">
+    Require all denied
+</FilesMatch>
